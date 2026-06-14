@@ -12,7 +12,7 @@
 
 ## Summary
 
-Notifications is the **pure downstream** BC — it consumes events from everywhere else, but publishes very little of substance back (only its own delivery status events).
+Notifications is the **pure downstream** BC — it consumes events from everywhere else and publishes very little back (only its own delivery-status events).
 
 Architectural shape:
 - One **subscription matrix** per user: `(event_type, channel) → enabled?`.
@@ -21,16 +21,28 @@ Architectural shape:
 
 This BC is the natural home for the **SSE endpoint** (in-app real-time push) — see [ADR 0007](../../adr/0007-sse-not-websocket.md).
 
+> Style: entities are plain data; delivery orchestration, template rendering, and event handling live in services.
+
 ## Channels (MVP)
 
 - **EMAIL** — transactional email via SMTP.
-- **IN_APP** — SSE stream to the authenticated user's open session, if any. Persisted as in-app inbox if no live session.
-- **PUSH** — *deferred*. Requires mobile app or web push setup.
+- **IN_APP** — SSE stream to the authenticated user's open connection, if any. Persisted as an in-app inbox when there is no live connection.
+- **PUSH** — *deferred*. Requires a mobile app or web-push setup.
+
+## SSE delivery (MVP shape)
+
+- One long-lived `GET /api/sse/events` connection per authenticated client (JWT-authenticated).
+- An in-memory `Map<UserId, List<SseEmitter>>` holds active connections (single-instance MVP).
+- On a relevant event, the matching user's emitters receive the message.
+- On disconnect, the emitter is evicted; the browser's `EventSource` reconnects with `Last-Event-ID`.
+- Missed messages while disconnected are recovered from the in-app inbox (not a replayed stream).
+- Behind nginx, the SSE response sets `X-Accel-Buffering: no` to disable buffering.
+- Multi-instance scaling (sticky sessions or Redis pub/sub fan-out) is deferred — see the SSE streaming technical note.
 
 ## Key invariants
 
 - Idempotency: receiving the same upstream event twice does not produce two notifications. Inbox pattern keyed by upstream `event_id`.
-- User preference is respected. If a user has disabled `PersonalRecordDetected` for `EMAIL`, no email is sent regardless of the upstream event.
+- User preference is respected. If a user disabled `PersonalRecordDetected` for `EMAIL`, no email is sent regardless of the upstream event.
 - Failed deliveries retry with backoff up to N attempts, then emit `NotificationFailed`.
 
 ## Events consumed
