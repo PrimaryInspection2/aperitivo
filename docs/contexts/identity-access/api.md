@@ -153,7 +153,7 @@ This is **optional** for the MVP: with short-lived tokens, logout can be reduced
 | `403 Forbidden` | Valid token but a missing/invalid CSRF token on a cookie-authenticated mutating request |
 | `302 Found` | OAuth redirects (initiate → Strava; callback → app home on success, login page on failure) |
 
-Error bodies for the JSON API follow the project-wide problem format (RFC 7807 `application/problem+json`); the OAuth endpoints redirect rather than return JSON, since they are browser-driven.
+Error bodies for the JSON API follow the project-wide [API error conventions](../../conventions/api-errors.md) (RFC 7807 `application/problem+json`); the OAuth endpoints redirect rather than return JSON, since they are browser-driven.
 
 ---
 
