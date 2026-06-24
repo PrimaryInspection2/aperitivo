@@ -64,6 +64,8 @@ For deauthorization, the shape is `aspect_type: "update"`, `object_type: "athlet
 
 Strava expects a `2xx` within **~2 seconds**, and treats slow/failed responses as delivery failures — chronic failure can deactivate the subscription. So the handler does the **minimum** before responding and defers all real work:
 
+> Strava **retries** a delivery up to **3 attempts** total if it does not receive a `200`. This is a useful backstop, but **not** a substitute for our own durability: 3 attempts can all fall inside the same outage, and Strava gives up after them. Our `RECEIVED`-row-before-`200` guarantees receipt survives independently of Strava's retry budget; reconciliation is the final net under both. The three layers stack — Strava retry (seconds), durable inbox (survives our crash), reconciliation (survives all of the above).
+
 ```java
 @PostMapping("/api/webhooks/strava")
 public ResponseEntity<Void> receive(@RequestBody String rawBody,
@@ -88,12 +90,14 @@ Resolving `owner_id` to a known `ConnectedSource` is exactly the kind of DB-touc
 
 ### Verification scope (MVP)
 
-Strava webhooks are not signed (no HMAC like some providers). The available guards are:
-- **`subscription_id` match** — the delivery names a subscription; we accept only our own.
-- **Endpoint obscurity + `verify_token`** established at subscription time.
+Strava's published webhook spec does **not** define a per-delivery signature: the documented security mechanism is the `verify_token`, and that token is sent only on the one-time validation `GET`, **not** on the per-event `POST`. So the guards available with certainty are weak, and our design must not lean on the webhook being authenticated:
+- **`subscription_id` match** — the delivery names a subscription; we accept only our own. (Weak: `subscription_id` is a guessable integer, not a secret — treat it as a filter, not authentication.)
+- **Endpoint obscurity + `verify_token`** established at subscription time (the token guards the handshake, not subsequent deliveries).
 - **`owner_id` resolution** (during async processing, not at receipt) — an `owner_id` that maps to no known active source is marked `FAILED` and creates no job.
 
-We do **not** treat the webhook body as trusted activity data — it carries only identifiers, and we re-fetch the actual activity from Strava with our own credentials. So even a forged webhook can at most cause a wasted `GET` for an `object_id` (rate-limit-bounded, and a non-existent id 404s harmlessly). The trust boundary is the **authenticated `GET` to Strava**, not the inbound webhook.
+> **`X-Strava-Signature` — verify at implementation time.** Strava's official webhook *example* code reads an `X-Strava-Signature` header (HMAC-SHA256 over `timestamp.body` with a signing secret) — but this header is **not** in the main Webhook Events API spec, and community reports indicate it historically did not exist on deliveries. The state of this header should be **confirmed against a live subscription during Phase 2 implementation**. If Strava does send it, HMAC verification becomes the **preferred** receipt-time guard (cheap, in-memory, no DB) and should replace reliance on `subscription_id`. The design below does not assume it, so adding it is a strict hardening, not a contract change.
+
+We do **not** treat the webhook body as trusted activity data — it carries only identifiers, and we re-fetch the actual activity from Strava with our own credentials. So even a forged webhook can at most cause a wasted `GET` for an `object_id` (rate-limit-bounded, and a non-existent id 404s harmlessly). The trust boundary is the **authenticated `GET` to Strava**, not the inbound webhook — which is why weak inbound verification is tolerable in the MVP even before the `X-Strava-Signature` question is settled.
 
 ### Responses
 

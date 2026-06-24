@@ -243,7 +243,7 @@ The Hibernate features Ingestion *does* use:
 
 There are **two** real sources of duplicate work, and one mechanism handles both:
 
-- **At-least-once webhook redelivery** — Strava sends the same webhook twice, seconds apart.
+- **At-least-once webhook redelivery** — Strava retries a delivery up to 3 attempts if it doesn't get a `200`, so the same webhook can arrive more than once, seconds apart.
 - **Webhook + reconciliation overlap** — the webhook ingested an activity at T=0; hours later reconciliation queries `?after=cursor`, the same activity falls in the window, and Strava returns it again.
 
 Dedup lives **only on `SyncJob`**, via the unique constraint on `(provider, providerActivityId, aspectType)`. When any source tries to create a job for an activity+aspect already in flight or done, the constraint makes it a no-op. This catches the dup **before** the expensive `GET /activities/{id}`, saving rate-limit budget — earlier than Catalog's own downstream dedup on `providerActivityId`.
@@ -357,7 +357,7 @@ public class SyncJobWorker {
 }
 ```
 
-> Rate-limit governance (budget tracking, 429 backoff, fair-share across users) and the per-user token-refresh lock are mechanics detailed in their own technical notes ([strava-rate-limits.md], [token-management.md](../../technical-notes/token-management.md)); this BC doc fixes the contract, not the mechanism.
+> Rate-limit governance (budget tracking, 429 backoff, fair-share across users) and the per-user token-refresh lock are mechanics detailed in their own technical notes ([strava-rate-limits.md](../../technical-notes/strava-rate-limits.md) — *to be written*, [token-management.md](../../technical-notes/token-management.md)); this BC doc fixes the contract, not the mechanism.
 
 ### BackfillService and ReconciliationService — the other two sources
 
