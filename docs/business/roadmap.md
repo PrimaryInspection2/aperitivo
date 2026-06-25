@@ -55,13 +55,15 @@ Goal: reliable post-activity ingestion.
 
 Goal: canonical Workout model.
 
-- `Workout` record with `Sport` discriminator
-- `Split` and `Stream` entities
+- `Workout` aggregate with `Sport` discriminator (tiers 1–2: summary + laps/segment-efforts/best-efforts)
+- Bounded `@OneToMany` child collections inside the aggregate; route as encoded `mapPolyline`
 - Normalization logic from raw Strava payload to canonical model
-- REST endpoints for listing and detail
-- `WorkoutPublished`, `WorkoutUpdated`, `WorkoutDeleted` events
+- REST endpoints for listing (projection) and detail (entity graph)
+- `WorkoutCreated`, `WorkoutUpdated`, `WorkoutDeleted` events
 
-**Exit:** Every `ActivityIngested` event results in a published `Workout`. Workouts are queryable by user, date range, and sport.
+> Tier-3 per-second streams are NOT in Catalog — they land in Performance Analytics (Phase 4).
+
+**Exit:** Every `ActivityIngested` event results in a persisted `Workout` and a `WorkoutCreated` event. Workouts are queryable by user, date range, and sport.
 
 ---
 
@@ -69,15 +71,18 @@ Goal: canonical Workout model.
 
 Goal: derived metrics with TimescaleDB.
 
-- TimescaleDB hypertables for daily TSS, CTL, ATL, TSB per user
-- Recomputation pipeline triggered by `WorkoutPublished`
-- TSS computation per sport (running, cycling, swimming)
+- TimescaleDB hypertable (`activity_samples`) for tier-3 per-second streams (bulk insert)
+- Derived relational tables: daily training load (CTL/ATL/TSB), personal records, power curve
+- Recomputation pipeline triggered by `WorkoutCreated`/`WorkoutUpdated`/`WorkoutDeleted`
+- Training-load computation per sport (power→TSS, HR→TRIMP, duration fallback)
 - Personal record detection
-- Trend detection (3+ week monotonic moves in CTL)
-- REST endpoints for fitness curves and PRs
-- `MetricsRecomputed`, `PersonalRecordDetected`, `TrendDetected` events
+- REST endpoints for fitness/form curves, power curves, and PRs
+- `PersonalRecordSet` event (the only event Analytics publishes)
 
-**Exit:** A user with backfilled history sees correct CTL/ATL/TSB charts. New workouts shift the curves promptly.
+> Trend detection (multi-week monotonic CTL moves) is post-MVP — it would add a new event then.
+> CTL/ATL/TSB and curves are read via the API, not broadcast as events.
+
+**Exit:** A user with backfilled history sees correct CTL/ATL/TSB charts. New workouts shift the curves promptly, and a new best emits `PersonalRecordSet`.
 
 ---
 

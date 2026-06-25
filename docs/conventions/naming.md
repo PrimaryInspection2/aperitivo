@@ -10,7 +10,7 @@ The goal is that a class name tells you which architectural layer it belongs to 
 |---|---|---|
 | JPA entity | `…Entity` | `UserEntity`, `ConnectedSourceEntity`, `WorkoutEntity` |
 | DTO (API in/out, cross-layer transfer) | `…Dto` | `UserDto`, `ProfileUpdateDto`, `WorkoutSummaryDto` |
-| Domain event (Spring Modulith) | `…Event` | `UserRegisteredEvent`, `WorkoutPublishedEvent`, `IntegrationRevokedEvent` |
+| Domain event (Spring Modulith) | `…Event` | `UserRegisteredEvent`, `WorkoutCreatedEvent`, `IntegrationRevokedEvent` |
 | Service (logic, transactions) | `…Service` | `UserService`, `ConnectedSourceService`, `WorkoutService` |
 | Repository (Spring Data JPA) | `…Repository` | `UserRepository`, `ConnectedSourceRepository` |
 | REST controller | `…Controller` | `AuthController`, `WorkoutController` |

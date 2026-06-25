@@ -16,7 +16,7 @@ The Planning BC is the only **forward-looking** BC in Aperitivo. Catalog and Ana
 
 A `Plan` is a multi-week structured program. Each `ScheduledSession` belongs to a date and has one or more `PlannedTarget`s (distance, duration, pace zone, power zone, TSS).
 
-When a `WorkoutPublished` event arrives, Planning attempts to match it to a pending `ScheduledSession` based on date proximity + sport + target similarity. The match produces a `Compliance` score and either a `SessionCompleted` or (eventually) `SessionMissed` event.
+When a `WorkoutCreated` event arrives, Planning attempts to match it to a pending `ScheduledSession` based on date proximity + sport + target similarity. The match produces a `Compliance` score and either a `SessionCompleted` or (eventually) `SessionMissed` event. A later `WorkoutUpdated` or `WorkoutDeleted` re-evaluates an existing match.
 
 ## Key invariants
 
@@ -32,7 +32,7 @@ When a `WorkoutPublished` event arrives, Planning attempts to match it to a pend
 
 ## Events consumed
 
-- `WorkoutPublished`, `WorkoutDeleted` (from Catalog)
+- `WorkoutCreated`, `WorkoutUpdated`, `WorkoutDeleted` (from Catalog)
 
 ## Key technical concerns
 

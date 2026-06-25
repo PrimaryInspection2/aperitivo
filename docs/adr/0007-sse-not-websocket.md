@@ -9,7 +9,7 @@
 Aperitivo needs server-to-client push for a small set of use cases. Enumerated across all roadmap phases, they are:
 
 - Progress feedback during initial Strava backfill ("imported 124 of 540 activities").
-- Notification of newly computed insights (`PersonalRecordDetected`, `TrendDetected`) without the client polling.
+- Notification of newly computed insights (`PersonalRecordSet`) without the client polling.
 - Notification of sync completion after a webhook-triggered ingestion finishes.
 - Scheduled-session reminders and in-app notifications generally.
 - Notification that a Strava connection broke (`IntegrationRevoked`), prompting reconnect.

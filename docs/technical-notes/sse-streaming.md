@@ -4,7 +4,7 @@ How Aperitivo pushes server-to-client messages with Server-Sent Events. Compleme
 
 ## Why SSE (recap)
 
-Every push use case in Aperitivo is one-directional (server → client) and tolerant of seconds-to-minutes latency: backfill progress, new insights (`PersonalRecordDetected`, `TrendDetected`), sync completion, session reminders, revocation notices. No use case needs the client to push back over a persistent connection. SSE covers all of it with plain HTTP, native browser support, and built-in reconnection. See [ADR 0007](../adr/0007-sse-not-websocket.md).
+Every push use case in Aperitivo is one-directional (server → client) and tolerant of seconds-to-minutes latency: backfill progress, new insights (`PersonalRecordSet`), sync completion, session reminders, revocation notices. No use case needs the client to push back over a persistent connection. SSE covers all of it with plain HTTP, native browser support, and built-in reconnection. See [ADR 0007](../adr/0007-sse-not-websocket.md).
 
 ## Endpoint
 

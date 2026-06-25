@@ -5,7 +5,7 @@
 
 ## Context
 
-Aperitivo is event-driven: Bounded Contexts communicate through domain events (`ActivityIngested` → `WorkoutPublished` → `MetricsRecomputed`/`SessionCompleted`/`PersonalRecordDetected` → notifications). The earlier documentation implicitly assumed Apache Kafka as the event transport, but the choice was never explicitly justified in an ADR.
+Aperitivo is event-driven: Bounded Contexts communicate through domain events (`ActivityIngested` → `WorkoutCreated` → `PersonalRecordSet`/`SessionCompleted` → notifications). The earlier documentation implicitly assumed Apache Kafka as the event transport, but the choice was never explicitly justified in an ADR.
 
 This ADR makes the decision explicit.
 
@@ -14,7 +14,7 @@ The question: do we need an external message broker (Kafka) for inter-BC events,
 Key facts shaping the decision:
 
 - Aperitivo is a **modular monolith** — all six BCs run in a single JVM. There are no cross-process consumers in the MVP, Phase 2, or Phase 3 roadmap.
-- The **source of truth is entity tables** (`Workout`, `ConnectedSource`, `Plan`, …), not an event log. Recomputing a new metric means iterating over `workouts`, not replaying `WorkoutPublished` events. Event-sourcing / log replay is not a requirement.
+- The **source of truth is entity tables** (`Workout`, `ConnectedSource`, `Plan`, …), not an event log. Recomputing a new metric means iterating over `workouts`, not replaying `WorkoutCreated` events. Event-sourcing / log replay is not a requirement.
 - The real throughput bottleneck is **Strava's API rate limits** (100 requests / 15 min, 1000 / day per app), not JVM event throughput. At 100K users this is on the order of single-digit events per second — trivially within reach of in-process handling.
 - Spring Modulith provides **persisted, transactional in-process events** out of the box via the `event_publication` table, plus a native migration path to externalized brokers.
 
@@ -27,12 +27,12 @@ Concretely:
 - Domain events are published via Spring's `ApplicationEventPublisher`.
 - Spring Modulith persists each publication in the `event_publication` table, in the **same transaction** as the originating business change — giving durability and transactional publication without a broker.
 - Consumers use `@ApplicationModuleListener` (which implies `@Async` + `@Transactional` + `@TransactionalEventListener(phase = AFTER_COMMIT)` semantics), so they run after the publisher's transaction commits.
-- Consumer idempotency is handled with an Inbox-style pattern keyed on the event's `event_id`, for consumers that publish their own events as a result (Analytics, Planning).
+- Consumer idempotency is handled with an Inbox-style pattern keyed on a natural business key in the payload (no synthetic eventId in MVP — see [event conventions](../events/conventions.md)), for consumers that publish their own events as a result (Analytics, Planning).
 - Module boundaries are verified at build time with `ApplicationModules.verify()`.
 
 **The events are designed to be Kafka-ready without using Kafka:**
 
-- Past-tense domain naming (`WorkoutPublished`, not `PublishWorkout`).
+- Past-tense domain naming (`WorkoutCreated`, not `CreateWorkout`).
 - Explicit versioning of event contracts.
 - `user_id` carried in every event payload — the natural partition key if events are ever externalized.
 - The event catalog documents events as **contracts**, not as Java class signatures.

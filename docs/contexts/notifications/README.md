@@ -41,13 +41,13 @@ This BC is the natural home for the **SSE endpoint** (in-app real-time push) —
 
 ## Key invariants
 
-- Idempotency: receiving the same upstream event twice does not produce two notifications. Inbox pattern keyed by upstream `event_id`.
-- User preference is respected. If a user disabled `PersonalRecordDetected` for `EMAIL`, no email is sent regardless of the upstream event.
+- Idempotency: receiving the same upstream event twice does not produce two notifications. Inbox pattern keyed by the upstream event's natural business key (e.g. `(provider, providerActivityId)` for activity-derived events; `(userId, sportType, recordType, providerActivityId)` for `PersonalRecordSet`) — no synthetic eventId in MVP, per the event conventions.
+- User preference is respected. If a user disabled `PersonalRecordSet` for `EMAIL`, no email is sent regardless of the upstream event.
 - Failed deliveries retry with backoff up to N attempts, then emit `NotificationFailed`.
 
 ## Events consumed
 
-- `PersonalRecordDetected`, `TrendDetected` (from Analytics)
+- `PersonalRecordSet` (from Analytics)
 - `IntegrationRevoked` (from IAM)
 - `ScheduledSessionDue`, `SessionCompleted`, `SessionMissed` (from Planning)
 - `IngestionFailed` (from Ingestion)

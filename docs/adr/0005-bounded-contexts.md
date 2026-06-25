@@ -56,7 +56,7 @@ Deferred. Coach-style use cases (one user viewing multiple athletes' data) are a
 
 **Positive:**
 - Each BC has one reason to change. Strava API changes → only Ingestion. New metric formula → only Analytics. New notification channel → only Notifications.
-- Event-driven flow is natural: `ActivityIngested` → `WorkoutPublished` → `MetricsRecomputed` + `SessionCompleted` → `PersonalRecordDetected` → notifications. Each step demonstrably independent. Events are delivered in-process via Spring Modulith (see [ADR 0008](0008-event-transport.md)).
+- Event-driven flow is natural: `ActivityIngested` → `WorkoutCreated` → (`PersonalRecordSet` + `SessionCompleted`) → notifications. Each step demonstrably independent. Events are delivered in-process via Spring Modulith (see [ADR 0008](0008-event-transport.md)).
 - Schema-per-context (within shared PostgreSQL) gives logical isolation without operational overhead.
 - Spring Modulith can enforce boundaries at build time via `ApplicationModules.verify()`.
 

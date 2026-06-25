@@ -77,7 +77,7 @@ public record ActivityIngestedEvent(
 ) {}
 ```
 
-**Consumers:** Workout Catalog — normalizes the payload into a `Workout` and publishes `WorkoutPublished` (first ingest) or `WorkoutUpdated` (edit).
+**Consumers:** Workout Catalog — normalizes the payload into a `Workout` and publishes `WorkoutCreated` (first ingest) or `WorkoutUpdated` (edit).
 
 **`create` vs `update` in one event.** Both fetch-and-store, both emit `ActivityIngestedEvent`; `aspectType` lets Catalog decide publish-vs-update without a second event type. A `create` for an activity Catalog already has, or an `update` for one it doesn't, are both handled on Catalog's side idempotently — Ingestion does not try to second-guess Catalog's state.
 
