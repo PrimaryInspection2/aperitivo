@@ -55,7 +55,7 @@ Goal: reliable post-activity ingestion.
 
 Goal: canonical Workout model.
 
-- `Workout` aggregate with `Sport` discriminator (tiers 1–2: summary + laps/segment-efforts/best-efforts)
+- `Workout` aggregate with `SportType` discriminator (tiers 1–2: summary + laps/segment-efforts/best-efforts)
 - Bounded `@OneToMany` child collections inside the aggregate; route as encoded `mapPolyline`
 - Normalization logic from raw Strava payload to canonical model
 - REST endpoints for listing (projection) and detail (entity graph)

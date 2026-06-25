@@ -11,7 +11,7 @@ The goal is that a class name tells you which architectural layer it belongs to 
 | JPA entity | `…Entity` | `UserEntity`, `ConnectedSourceEntity`, `WorkoutEntity` |
 | DTO (API in/out, cross-layer transfer) | `…Dto` | `UserDto`, `ProfileUpdateDto`, `WorkoutSummaryDto` |
 | Domain event (Spring Modulith) | `…Event` | `UserRegisteredEvent`, `WorkoutCreatedEvent`, `IntegrationRevokedEvent` |
-| Service (logic, transactions) | `…Service` | `UserService`, `ConnectedSourceService`, `WorkoutService` |
+| Service (logic, transactions) | `…Service` | `UserService`, `ConnectedSourceService`, `WorkoutQueryService` |
 | Repository (Spring Data JPA) | `…Repository` | `UserRepository`, `ConnectedSourceRepository` |
 | REST controller | `…Controller` | `AuthController`, `WorkoutController` |
 
@@ -20,7 +20,7 @@ The goal is that a class name tells you which architectural layer it belongs to 
 - **Role-signaling services may keep a domain-meaningful suffix** instead of `…Service` when the name communicates a specific responsibility. The canonical case is **`TokenManager`** — the single owner of token access. `Manager` here signals "sole gatekeeper of this resource," which is more informative than `TokenService`. Use this sparingly and only when the role name genuinely adds meaning.
 
 - **Enums and value objects take no suffix.** They are domain types, not layered artifacts.
-  - Enums: `Provider`, `SourceStatus`, `Sport`, `Channel`.
+  - Enums: `Provider`, `SourceStatus`, `SportType`, `Channel`.
   - Value objects / immutable data holders: `StravaTokens`, `StravaProfile`, `StravaOAuthResult`, `PlannedTarget`.
 
 ## Domain events are plain records

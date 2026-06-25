@@ -70,11 +70,11 @@ All arrows labeled with event names are Spring Modulith application events deliv
 - Webhook receiver and verification
 - Sync job runner (initial backfill, periodic reconciliation)
 - `RawActivityPayload` (raw Strava JSON, retained for replay)
-- `SyncCursor` per athlete (last successful sync watermark)
+- `SyncState` per source, carrying the `SyncCursor` watermark (last successful sync point)
 - Idempotency keys, dedup logic
 - Strava API rate-limit governance
 
-**Language:** WebhookEvent, SyncJob, RawActivityPayload, SyncCursor, IngestionFailure.
+**Language:** WebhookEvent, SyncJob, RawActivityPayload, SyncState, SyncCursor (the watermark on SyncState), IngestionFailed.
 
 **Publishes events:**
 - `ActivityIngested` (raw payload normalized into a canonical pre-Workout shape)
@@ -91,19 +91,19 @@ All arrows labeled with event names are Spring Modulith application events deliv
 
 ### 3. Workout Catalog
 
-**Responsibility:** The canonical, sport-aware model of a completed workout. Single source of truth for "what happened" — distance, duration, sport, splits, streams, route.
+**Responsibility:** The canonical, sport-aware model of a completed workout (tiers 1–2: summary + bounded structured collections). Single source of truth for "what happened" — distance, duration, sport, laps, segment efforts, best efforts, route polyline. (Per-second streams are tier-3, owned by Performance Analytics.)
 
 **Owns (tiers 1–2 only):**
 - `Workout` (aggregate root per activity — summary metrics)
 - `Lap` (per-lap/interval segment), `SegmentEffort`, `BestEffort` — bounded `@OneToMany` collections inside the aggregate
 - Route as an encoded `mapPolyline` string (whole-read for map rendering)
-- `Sport`-specific metadata (Run vs Ride vs Swim attributes)
+- `SportType`-specific metadata (Run vs Ride vs Swim attributes)
 
 **Does NOT own:** tier-3 per-second streams (HR/watts/cadence/velocity, 10³–10⁴ samples). Those
 live in Performance Analytics' TimescaleDB hypertable. Modelling them as a JPA `@OneToMany` in
 Catalog is a documented rejected anti-pattern (see Catalog domain-model.md).
 
-**Language:** Workout, Sport, Lap, SegmentEffort, BestEffort, Route (polyline).
+**Language:** Workout, SportType, Lap, SegmentEffort, BestEffort, Route (polyline).
 
 **Publishes events:**
 - `WorkoutCreated` (a new canonical Workout normalized from a `create` aspect)
@@ -156,6 +156,11 @@ and `TrendDetected` were dropped — continuous state is queried, and trend dete
 - Planned-vs-actual matching logic
 
 **Language:** Plan, ScheduledSession, Compliance, PlannedTarget (distance/pace/duration/TSS).
+
+> Open question (resolve at Planning deep-dive): a `PlannedTarget` expressed in TSS couples
+> Planning to an Analytics-owned metric. Options: store the planned TSS as a plain target number
+> Planning owns (no coupling), or compute compliance by reading Analytics. Deferred to the
+> Planning BC design.
 
 **Publishes events:**
 - `ScheduledSessionDue` (used by Notifications)

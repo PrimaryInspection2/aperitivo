@@ -133,7 +133,7 @@ Format: each use case has a **trigger**, **actors**, **flow**, and **success cri
 
 **Flow:**
 1. Scheduler iterates `ConnectedSource`s with `status = ACTIVE`.
-2. For each, calls Strava `GET /athlete/activities?after={SyncCursor.last_synced_at}`.
+2. For each, calls Strava `GET /athlete/activities?after={last_synced_at}` (the SyncCursor watermark, stored on the source's `SyncState` row).
 3. For each missed activity, creates a `SyncJob` (same path as UC-3 from step 3 onward).
 4. Updates the `SyncCursor`.
 
