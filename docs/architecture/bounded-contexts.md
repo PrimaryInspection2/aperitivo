@@ -157,10 +157,11 @@ and `TrendDetected` were dropped — continuous state is queried, and trend dete
 
 **Language:** Plan, ScheduledSession, Compliance, PlannedTarget (distance/pace/duration/TSS).
 
-> Open question (resolve at Planning deep-dive): a `PlannedTarget` expressed in TSS couples
-> Planning to an Analytics-owned metric. Options: store the planned TSS as a plain target number
-> Planning owns (no coupling), or compute compliance by reading Analytics. Deferred to the
-> Planning BC design.
+> Resolved at the Planning deep-dive: a `PlannedTarget` of type TSS stores a **planned number
+> Planning owns** (authoring-time intent). MVP compliance is computed from directly-readable
+> workout dimensions (distance/duration/pace) — Planning does **not** read Analytics' actual TSS,
+> so there is no cross-BC coupling in the matching path. A TSS-accurate compliance would read
+> Analytics' published port later (additive, deferred). See [Planning domain-model](../contexts/training-planning/domain-model.md).
 
 **Publishes events:**
 - `ScheduledSessionDue` (used by Notifications)
@@ -169,7 +170,7 @@ and `TrendDetected` were dropped — continuous state is queried, and trend dete
 
 **Consumes:**
 - `WorkoutCreated`/`WorkoutUpdated`/`WorkoutDeleted` from Catalog (match against schedule; re-evaluate on update/delete)
-- Read access to Analytics for plan personalization
+- (Deferred) read access to Analytics' published port for TSS-accurate compliance — not used in MVP
 
 **See:** [Training Planning deep dive](../contexts/training-planning/README.md)
 

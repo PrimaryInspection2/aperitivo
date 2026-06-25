@@ -5,19 +5,21 @@
 ## Documents
 
 - [README](README.md) — this overview
-- [Domain Model](domain-model.md) — *to be written* — Notification, Channel, Template, Preference, DeliveryAttempt
-- [API](api.md) — *to be written* — preferences CRUD, SSE endpoint, delivery history
-- [Events](events.md) — *to be written*
-- [Database Schema](database.md) — *to be written*
+- [Domain Model](domain-model.md) — Notification, Channel, Template, Preference, DeliveryAttempt, the SSE registry
+- [Database Schema](database.md) — preferences, templates, inbox/dedup, delivery attempts
+- [Events](events.md) — the five consumed upstreams (+ dedup keys); published `NotificationDelivered/Failed`
+- [API](api.md) — preferences CRUD, SSE endpoint, inbox/history, mark-read
+- [Sequence: event to notification](diagrams/sequence/event-to-notification.md)
+- [SSE streaming](../../technical-notes/sse-streaming.md) — the SSE mechanics
 
 ## Summary
 
 Notifications is the **pure downstream** BC — it consumes events from everywhere else and publishes very little back (only its own delivery-status events).
 
 Architectural shape:
-- One **subscription matrix** per user: `(event_type, channel) → enabled?`.
-- One **template** per `(event_type, channel)` combination.
-- An incoming domain event → look up matching subscriptions → render template per channel → enqueue `DeliveryAttempt`s → process via channel-specific adapters.
+- One **subscription matrix** per user: `(eventType, channel) → enabled?` (absence falls back to a code-defined default).
+- One **template** per `(eventType, channel)` combination.
+- An incoming domain event → dedup on its natural business key → gate on preferences → render template per channel → enqueue `DeliveryAttempt`s → deliver via channel-specific adapters.
 
 This BC is the natural home for the **SSE endpoint** (in-app real-time push) — see [ADR 0007](../../adr/0007-sse-not-websocket.md).
 
@@ -43,6 +45,7 @@ This BC is the natural home for the **SSE endpoint** (in-app real-time push) —
 
 - Idempotency: receiving the same upstream event twice does not produce two notifications. Inbox pattern keyed by the upstream event's natural business key (e.g. `(provider, providerActivityId)` for activity-derived events; `(userId, sportType, recordType, providerActivityId)` for `PersonalRecordSet`) — no synthetic eventId in MVP, per the event conventions.
 - User preference is respected. If a user disabled `PersonalRecordSet` for `EMAIL`, no email is sent regardless of the upstream event.
+- No message lost to a dropped SSE connection: every notification persists as an inbox row first; SSE is a live-delivery optimization on top.
 - Failed deliveries retry with backoff up to N attempts, then emit `NotificationFailed`.
 
 ## Events consumed
@@ -56,3 +59,5 @@ This BC is the natural home for the **SSE endpoint** (in-app real-time push) —
 
 - `NotificationDelivered`
 - `NotificationFailed`
+
+(Both are emitted for observability and a future alerting seam; no MVP consumer.)
