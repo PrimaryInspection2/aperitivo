@@ -27,9 +27,9 @@ flowchart LR
     Strava -- OAuth login --> IAM
     IAM -- ConnectedSource tokens (in-process) --> ING
     ING -- ActivityIngested --> CAT
-    CAT -- WorkoutPublished --> ANA
-    CAT -- WorkoutPublished --> PLAN
-    ANA -- MetricsRecomputed, PersonalRecordDetected --> NOTIF
+    CAT -- WorkoutCreated/Updated/Deleted --> ANA
+    CAT -- WorkoutCreated/Updated/Deleted --> PLAN
+    ANA -- PersonalRecordSet --> NOTIF
     IAM -- IntegrationRevoked --> NOTIF
     PLAN -- ScheduledSessionDue --> NOTIF
 ```
@@ -93,18 +93,26 @@ All arrows labeled with event names are Spring Modulith application events deliv
 
 **Responsibility:** The canonical, sport-aware model of a completed workout. Single source of truth for "what happened" — distance, duration, sport, splits, streams, route.
 
-**Owns:**
-- `Workout` (root record per activity)
-- `Split` (per-km/per-mile segment)
-- `Stream` (time-series HR, power, pace, GPS — bulk-stored)
+**Owns (tiers 1–2 only):**
+- `Workout` (aggregate root per activity — summary metrics)
+- `Lap` (per-lap/interval segment), `SegmentEffort`, `BestEffort` — bounded `@OneToMany` collections inside the aggregate
+- Route as an encoded `mapPolyline` string (whole-read for map rendering)
 - `Sport`-specific metadata (Run vs Ride vs Swim attributes)
 
-**Language:** Workout, Sport, Split, Stream, Effort, Route.
+**Does NOT own:** tier-3 per-second streams (HR/watts/cadence/velocity, 10³–10⁴ samples). Those
+live in Performance Analytics' TimescaleDB hypertable. Modelling them as a JPA `@OneToMany` in
+Catalog is a documented rejected anti-pattern (see Catalog domain-model.md).
+
+**Language:** Workout, Sport, Lap, SegmentEffort, BestEffort, Route (polyline).
 
 **Publishes events:**
-- `WorkoutPublished` (a new canonical Workout is ready for downstream consumption)
-- `WorkoutUpdated` (athlete edited title/description/sport in Strava, sync caught it)
+- `WorkoutCreated` (a new canonical Workout normalized from a `create` aspect)
+- `WorkoutUpdated` (existing Workout re-normalized from an `update` aspect)
 - `WorkoutDeleted`
+
+Split into three (Ingestion merges create/update via an `aspectType` field; Catalog splits them)
+because downstream reactions differ — Analytics folds new load in on `WorkoutCreated` but
+recomputes forward on `WorkoutUpdated`/`WorkoutDeleted`.
 
 **Consumes:**
 - `ActivityIngested` from Ingestion
@@ -118,20 +126,21 @@ All arrows labeled with event names are Spring Modulith application events deliv
 
 **Responsibility:** Derived metrics over time. Training load, fitness/fatigue/form (CTL/ATL/TSB), personal records, trends, power/pace curves. Read-heavy, recomputed.
 
-**Owns:**
-- Time-series storage (TimescaleDB hypertables) for daily/weekly aggregates
-- `FitnessScore`, `TrainingLoad`, `Trend`, `PersonalRecord` projections
-- Recomputation pipeline (event-driven, triggered by `WorkoutPublished`)
+**Owns (tier-3 + derived):**
+- The `activity_samples` TimescaleDB hypertable — tier-3 per-second streams (bulk insert, never an ORM collection)
+- Derived relational metrics: `daily_training_load` (CTL/ATL/TSB), `personal_records`, `activity_power_curve`
+- Recomputation pipeline (event-driven, triggered by `WorkoutCreated`/`Updated`/`Deleted`)
 
-**Language:** FitnessScore (CTL), TrainingLoad (ATL), Form (TSB), TSS, PR, Trend, TimeWindow, Curve.
+**Language:** FitnessScore (CTL), TrainingLoad (ATL), Form (TSB), TSS, PR, TimeWindow, Curve.
 
 **Publishes events:**
-- `MetricsRecomputed`
-- `PersonalRecordDetected`
-- `TrendDetected` (e.g. fitness rising 3 weeks in a row)
+- `PersonalRecordSet` (the only event Analytics emits; carries value + previousValue)
+
+(CTL/ATL/TSB, curves, and stream slices are read via the API, not broadcast. `MetricsRecomputed`
+and `TrendDetected` were dropped — continuous state is queried, and trend detection is post-MVP.)
 
 **Consumes:**
-- `WorkoutPublished`, `WorkoutUpdated`, `WorkoutDeleted` from Catalog
+- `WorkoutCreated`, `WorkoutUpdated`, `WorkoutDeleted` from Catalog
 
 **See:** [Performance Analytics deep dive](../contexts/performance-analytics/README.md)
 
@@ -154,7 +163,7 @@ All arrows labeled with event names are Spring Modulith application events deliv
 - `SessionMissed`
 
 **Consumes:**
-- `WorkoutPublished` from Catalog (to match against schedule)
+- `WorkoutCreated`/`WorkoutUpdated`/`WorkoutDeleted` from Catalog (match against schedule; re-evaluate on update/delete)
 - Read access to Analytics for plan personalization
 
 **See:** [Training Planning deep dive](../contexts/training-planning/README.md)
@@ -179,7 +188,7 @@ All arrows labeled with event names are Spring Modulith application events deliv
 - `NotificationFailed`
 
 **Consumes:**
-- `PersonalRecordDetected`, `TrendDetected` from Analytics
+- `PersonalRecordSet` from Analytics
 - `IntegrationRevoked` from IAM
 - `ScheduledSessionDue`, `SessionCompleted`, `SessionMissed` from Planning
 - `IngestionFailed` from Ingestion
@@ -192,7 +201,7 @@ All arrows labeled with event names are Spring Modulith application events deliv
 
 1. **No BC reads another BC's database directly.** All inter-BC interaction goes through published in-process interfaces (synchronous queries) or application events (asynchronous propagation).
 2. **Each BC has its own schema** within the shared PostgreSQL instance. This enforces logical separation while keeping operations simple. Future extraction to separate DBs is mechanical.
-3. **Events are immutable facts about the past.** Naming: past tense (`WorkoutPublished`, not `PublishWorkout`).
+3. **Events are immutable facts about the past.** Naming: past tense (`WorkoutCreated`, not `CreateWorkout`).
 4. **Events are in-process** (Spring Modulith), persisted in `event_publication`, published after commit. Designed to be Kafka-ready but not externalized in MVP. See [ADR 0008](../adr/0008-event-transport.md).
 5. **TimescaleDB lives only in Performance Analytics.** Other BCs use plain PostgreSQL. Time-series concerns are isolated.
 6. **Modules in Spring Modulith enforce these boundaries at build time.** Architecture tests fail if a BC imports another BC's internal package.

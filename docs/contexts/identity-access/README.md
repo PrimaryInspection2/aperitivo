@@ -5,10 +5,12 @@
 ## Documents
 
 - [README](README.md) — this overview
-- [Domain Model](domain-model.md) — *to be written* — User, ConnectedSource, value objects
-- [API](api.md) — *to be written* — REST endpoints exposed by IAM
-- [Events](events.md) — *to be written* — events published and consumed
-- [Database Schema](database.md) — *to be written* — tables, indices, migrations
+- [Domain Model](domain-model.md) — User, ConnectedSource, value objects, the `sub` claim
+- [Database Schema](database.md) — tables, indices, partial unique index, migrations
+- [Events](events.md) — `UserRegistered`, `IntegrationConnected`, `IntegrationRevoked`
+- [API](api.md) — OAuth login, callback, current-user, logout
+- [Sequence: Strava OAuth login](diagrams/sequence/strava-oauth-login.md)
+- Technical notes: [token-management](../../technical-notes/token-management.md), [jwt-and-keys](../../technical-notes/jwt-and-keys.md)
 
 ## Summary
 
@@ -29,9 +31,9 @@ The IAM BC owns:
 
 ## Events published
 
-- `UserRegistered`
-- `IntegrationConnected`
-- `IntegrationRevoked`
+- `UserRegistered` (`user-registered.v1`)
+- `IntegrationConnected` (`integration-connected.v1`)
+- `IntegrationRevoked` (`integration-revoked.v1`)
 
 ## Events consumed
 

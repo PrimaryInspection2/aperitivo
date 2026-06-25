@@ -56,12 +56,12 @@ Format: each use case has a **trigger**, **actors**, **flow**, and **success cri
 5. The worker calls `GET /activities/{object_id}` on the Strava API.
 6. The raw payload is stored as `RawActivityPayload`.
 7. Ingestion BC emits `ActivityIngested`.
-8. Workout Catalog consumes it, normalizes the payload, persists a `Workout`, emits `WorkoutPublished`.
-9. Performance Analytics consumes `WorkoutPublished`, recomputes derived metrics, possibly emits `PersonalRecordDetected`.
-10. Training Planning consumes `WorkoutPublished`, attempts to match against a pending `ScheduledSession`.
-11. Notifications consumes any `PersonalRecordDetected` or `SessionCompleted` and delivers per user preference.
+8. Workout Catalog consumes it, normalizes the payload, persists a `Workout`, emits `WorkoutCreated`.
+9. Performance Analytics consumes `WorkoutCreated`, materializes streams, recomputes derived metrics, possibly emits `PersonalRecordSet`.
+10. Training Planning consumes `WorkoutCreated`, attempts to match against a pending `ScheduledSession`.
+11. Notifications consumes any `PersonalRecordSet` or `SessionCompleted` and delivers per user preference.
 
-**Events emitted:** `ActivityIngested` → `WorkoutPublished` → (`MetricsRecomputed`, `PersonalRecordDetected`, `SessionCompleted`).
+**Events emitted:** `ActivityIngested` → `WorkoutCreated` → (`PersonalRecordSet`, `SessionCompleted`).
 
 **BCs involved:** all six.
 
@@ -91,7 +91,7 @@ Format: each use case has a **trigger**, **actors**, **flow**, and **success cri
 **Trigger:** User navigates to the "Performance" view in the client.
 
 **Flow:**
-1. Client calls `GET /api/analytics/fitness?from=...&to=...`.
+1. Client calls `GET /api/athlete/fitness?from=...&to=...`.
 2. Performance Analytics returns a time-series of CTL/ATL/TSB from TimescaleDB.
 
 **BCs involved:** Performance Analytics.

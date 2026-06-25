@@ -9,8 +9,8 @@ These are longer-form explorations of specific technical areas — implementatio
 - [Token management](token-management.md) — TokenManager component design, concurrency, AES-GCM encryption, lazy vs proactive refresh, revocation
 - [SSE streaming](sse-streaming.md) — SseEmitter architecture, in-memory emitter registry, reconnect strategy, proxy considerations
 - [TimescaleDB schema](timescaledb-schema.md) — hypertable design, retention policies, continuous aggregates
-- [Encryption at rest](encryption-at-rest.md) — AES-GCM column encryption, key management, envelope encryption with Vault/KMS
+- [Encryption at rest](encryption-at-rest.md) — *to be written* — AES-GCM column encryption, key management, envelope encryption with Vault/KMS
 - [Spring Modulith boundaries](spring-modulith-boundaries.md) — *to be written* — module structure, allowed dependencies, `ApplicationModules.verify()` in CI
-- [Strava rate limit governance](strava-rate-limits.md) — *to be written* — budget tracking, backoff, fair-share across users
+- [Strava rate limit governance](strava-rate-limits.md) — budget tracking, backoff, fair-share across users
 - [Idempotency and outbox patterns](idempotency-and-outbox.md) — *to be written* — concrete implementation patterns for Inbox/Outbox in Spring Modulith
 - [JWT issuance and validation](jwt-and-keys.md) — JwtEncoder setup, RS256 key loading, JWKS endpoint, jti blacklist in Redis
