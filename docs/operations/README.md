@@ -14,6 +14,6 @@ Runtime concerns for Aperitivo: observability, security, deployment, and inciden
 - `runbooks/strava-rate-limit-exceeded.md` — what to do when we hit the 15-min or daily quota
 - `runbooks/ingestion-lag-alert.md` — when ingestion is falling behind
 - `runbooks/token-refresh-failures.md` — pattern of refresh failures across many users
-- `runbooks/kafka-consumer-lag.md` — consumers falling behind
+- `runbooks/event-processing-lag.md` — Spring Modulith event listeners falling behind (incomplete `event_publication` rows accumulating); the in-process analogue of consumer lag
 - `runbooks/database-connection-saturation.md`
 - `runbooks/deauthorization-storm.md` — many users revoking at once (e.g. after a Strava ToS change)

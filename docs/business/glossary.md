@@ -42,53 +42,65 @@ DDD principle: when the same word means different things in different Bounded Co
 
 ## Activity Ingestion
 
-**WebhookEvent** — an incoming notification from Strava. Has shape `{ aspect_type, object_type, object_id, owner_id, updates }`. Carries no actual activity data — just identifiers.
+**WebhookEvent** — an incoming notification from Strava. Has shape `{ aspect_type, object_type, object_id, owner_id, updates }`. Carries no actual activity data — just identifiers. Persisted verbatim as a durable inbox row.
 
-**RawActivityPayload** — the JSON returned by Strava's `GET /activities/{id}` endpoint, stored verbatim. Retained for replay and debugging.
+**RawActivityPayload** — the JSON returned by Strava's `GET /activities/{id}` endpoint, stored verbatim. Retained as the **replay source of truth**: Catalog re-normalizes from it and Analytics re-materializes streams from it, without re-calling Strava.
 
-**SyncJob** — a unit of ingestion work. Triggered by a webhook, by a periodic reconciliation, or by an initial backfill. Has retry semantics.
+**SyncJob** — a unit of ingestion work. Triggered by a webhook, by a periodic reconciliation, or by an initial backfill — all three converge here. Has retry semantics and a status machine.
 
-**SyncCursor** — the watermark per `(user_id, provider)` indicating the last successfully synced activity. Used by reconciliation jobs to detect missed webhooks.
+**SyncState** — the per-`(user_id, provider)` record carrying sync progress; persisted as `sync_state`. Its watermark fields are the **SyncCursor**.
 
-**Idempotency Key** — the combination `(provider, provider_activity_id, aspect_type)` used to deduplicate webhook deliveries (Strava can deliver the same event multiple times).
+**SyncCursor** — the watermark (on the `SyncState` row) indicating the last successfully synced point (`last_synced_at` + `last_synced_activity_id` tie-break). Used by reconciliation to detect missed webhooks.
 
-**Rate Limit Budget** — the count of remaining Strava API calls in the current 15-minute and 24-hour windows. Tracked per access token. The Ingestion BC must respect this. This is the system's real throughput bottleneck.
+**Idempotency Key** — the combination `(provider, provider_activity_id, aspect_type)` used to deduplicate webhook deliveries (Strava can deliver the same event multiple times). Enforced as a unique constraint on `sync_jobs`.
 
-**Activity** — in this BC only, refers to the *raw, Strava-shaped* representation of a workout. Once normalized and emitted as `ActivityIngested`, it leaves Ingestion's world and becomes a `Workout` in Catalog.
+**Rate Limit Budget** — the count of remaining Strava API calls in the current 15-minute and 24-hour windows. Tracked in Redis (not relational state). The Ingestion BC must respect this. This is the system's real throughput bottleneck. See [strava-rate-limits.md](../technical-notes/strava-rate-limits.md).
+
+**Activity** — in this BC only, refers to the *raw, Strava-shaped* representation of a workout. Once archived and emitted as `ActivityIngested`, it leaves Ingestion's world and becomes a `Workout` in Catalog.
 
 ---
 
 ## Workout Catalog
 
-**Workout** — the canonical, sport-aware representation of a completed training session in Aperitivo. The root record of this BC. Identified by an Aperitivo-internal UUID. Source of truth for "what happened."
+**Workout** — the canonical, sport-aware representation of a completed training session in Aperitivo. The aggregate root of this BC. Identified by an Aperitivo-internal UUID. Source of truth for "what happened and how it was structured." Holds **tiers 1–2** only (summary + bounded structured collections); per-second telemetry (tier 3) lives in Performance Analytics.
 
 Note: a `Workout` corresponds 1:1 to a Strava activity in MVP, but the model does not assume this — it is provider-agnostic.
 
-**Sport** — discriminator for sport-specific subtypes. MVP: `RUN`, `RIDE`, `SWIM`, `OTHER`. Each may have sport-specific metadata (e.g. `RUN.cadence`, `RIDE.power_avg`).
+**SportType** — the enum discriminating the kind of activity. MVP values: `RUN`, `TRAIL_RUN`, `RIDE`, `GRAVEL_RIDE`, `MOUNTAIN_BIKE`, `SWIM`, `OPEN_WATER_SWIM`, `WORKOUT`, `HIKE`, `WALK`, `OTHER`. Unknown Strava values map to `OTHER` rather than failing normalization.
 
-**Split** — a sub-segment of a Workout, typically per-km or per-mile, with its own duration, distance, pace, HR, etc.
+**Lap** — a tier-2 sub-segment of a Workout (a lap/interval as recorded by Strava), with its own distance, moving time, average power/HR, and `start_index`/`end_index` offsets into the activity's stream. Modeled as an `@OneToMany` child inside the `Workout` aggregate. (Replaces the earlier "Split" term.)
 
-**Stream** — a time-series of one channel (HR, power, pace, GPS lat/lon, elevation) sampled second-by-second. Bulk-stored, opaque to most consumers. Used by Analytics for curve computations.
+**SegmentEffort** — a tier-2 record of the athlete's effort over a Strava segment within a Workout: `segmentId` (a plain id-reference to Strava's global segment, **not** a modeled `Segment` aggregate in MVP), elapsed time, distance, and PR rank if applicable. An `@OneToMany` child of the aggregate.
 
-**Effort** — *(future)* a segment-level performance within a Workout (e.g. Strava segment). Not in MVP.
+**BestEffort** — a tier-2 best-effort record within a Workout (e.g. fastest `5k`, `1k`) as provided by Strava. An `@OneToMany` child of the aggregate.
+
+**Route (polyline)** — the GPS track of a Workout, stored as Strava's **encoded polyline string** (`mapPolyline`) on the `Workout`. Whole-read for map rendering; it is *not* modeled as a per-point relational collection, and the numeric per-second streams live in Analytics, not here.
+
+> Removed from this BC's language: "Split" (now `Lap`), "Stream" (tier-3, owned by Performance Analytics — see below), "Effort (future)" (now the concrete `SegmentEffort` / `BestEffort`).
 
 ---
 
 ## Performance Analytics
 
-**Training Load (TSS)** — Training Stress Score. A single number summarizing how taxing a single workout was. Derived from duration × intensity. Different formulas per sport (rTSS for running, TSS for cycling, sTSS for swimming).
+**Stream** — a time-series of one channel (heart rate, power, cadence, velocity, altitude) sampled second-by-second, 10³–10⁴ samples per channel per activity. **Owned by Performance Analytics** (tier-3), stored in the TimescaleDB `activity_samples` hypertable via bulk insert — never as a JPA collection. Sourced from `RawActivityPayload`. (The GPS lat/lon track is the exception: it stays in Catalog as an encoded polyline.)
 
-**Fitness (CTL)** — Chronic Training Load. A 42-day exponentially weighted moving average of TSS. Proxies long-term fitness.
+**activity_samples** — the TimescaleDB hypertable holding per-second `Stream` data, partitioned on time, bulk-inserted, queried with `time_bucket`/aggregates.
 
-**Fatigue (ATL)** — Acute Training Load. A 7-day exponentially weighted moving average of TSS. Proxies short-term fatigue.
+**Training Load (TSS)** — Training Stress Score. A single number summarizing how taxing a single workout was. Computed from the streams: power→TSS (cycling), HR-based TRIMP (most sports), duration×intensity fallback. Summed per user per day as the input to CTL/ATL.
+
+**Fitness (CTL)** — Chronic Training Load. A ~42-day exponentially weighted moving average of daily training load. Proxies long-term fitness.
+
+**Fatigue (ATL)** — Acute Training Load. A ~7-day exponentially weighted moving average of daily training load. Proxies short-term fatigue.
 
 **Form (TSB)** — Training Stress Balance. `CTL − ATL`. Positive (CTL > ATL) = rested; negative = currently overloaded. Used to gauge race-day readiness.
 
-**Personal Record (PR)** — best-ever performance over a specified distance/duration/sport. E.g. fastest 5km run, highest 20-minute average power, longest ride.
+**Personal Record (PR)** — best-ever performance over a specified distance/duration/sport. E.g. fastest 5km run, highest 20-minute average power, longest ride. Stored in `personal_records`; a new best emits `PersonalRecordSet`.
 
-**Trend** — a detected directional change in a derived metric over a time window (e.g. "fitness rising for 3 weeks").
+**Curve** — a mean-max relationship over duration, computed from the streams: the power curve (best average power for every duration from 1s to hours) and its pace equivalent. Stored in `activity_power_curve` and served via the API. (In MVP — the TimescaleDB schema is built for it.)
 
-**Curve** — *(future)* a relationship between two metrics, e.g. mean-max power curve, pace curve. Not in MVP scope but the TimescaleDB schema is designed for it.
+**Recompute-forward-from-date** — the rule that an updated or deleted workout changes its day's training load and therefore every CTL/ATL/TSB value from that date onward; Analytics recomputes the affected tail. The reason Catalog splits create/update/delete into distinct events.
+
+**Trend** — *(post-MVP)* a detected directional change in a derived metric over a time window (e.g. "fitness rising for 3 weeks"). Not built in MVP; would introduce a new event when added.
 
 ---
 
@@ -98,7 +110,7 @@ Note: a `Workout` corresponds 1:1 to a Strava activity in MVP, but the model doe
 
 **ScheduledSession** — a planned workout for a specific date. Has `PlannedTarget`s (e.g. "60 minutes Z2 run, 8 km").
 
-**PlannedTarget** — a specific intended attribute of a scheduled session (distance, duration, pace zone, power zone, TSS).
+**PlannedTarget** — a specific intended attribute of a scheduled session (distance, duration, pace zone, power zone, TSS). *(Note: whether a TSS-valued target couples Planning to an Analytics-owned metric is an open question resolved at the Planning BC deep-dive — see the bounded-contexts overview.)*
 
 **Compliance** — how well the actual completed workout matched the planned session. Computed as a similarity score plus per-target deltas.
 
@@ -118,4 +130,4 @@ Note: a `Workout` corresponds 1:1 to a Strava activity in MVP, but the model doe
 
 **DeliveryAttempt** — a single attempt to send one Notification through one Channel. Has status (`QUEUED`, `SENT`, `FAILED`, `RETRYING`) and a retry counter.
 
-**SseEmitter** — the Spring MVC construct holding one user's open SSE connection. Held in an in-memory per-user registry in this BC.
+**SseEmitter** — the Spring MVC construct holding one user's open SSE connection.

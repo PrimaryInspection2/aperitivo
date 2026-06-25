@@ -221,7 +221,7 @@ The four tables have very different growth and retention profiles — worth stat
 
 - **No cross-BC foreign keys.** `user_id` references IAM by value only — see schema ownership. This is what makes future extraction to a separate database mechanical.
 - **No `webhook_events` → `sync_jobs` FK.** They correlate by `(provider, provider_activity_id)` and have independent lifecycles; a payload/job may also originate from backfill/reconciliation with no webhook row at all.
-- **No rate-limit-budget table.** Budget tracking is Redis counters per token window (see [strava-rate-limits.md](../../technical-notes/strava-rate-limits.md) — *to be written*), not relational state — it is high-churn, ephemeral, and never needs to be transactional with activity data.
+- **No rate-limit-budget table.** Budget tracking is Redis counters per token window (see [strava-rate-limits.md](../../technical-notes/strava-rate-limits.md)), not relational state — it is high-churn, ephemeral, and never needs to be transactional with activity data.
 - **No normalized activity tables.** Normalization happens in Workout Catalog; Ingestion stores only the raw payload. The canonical `Workout` schema lives in Catalog's `database.md`.
 
 ## Next documents in this BC

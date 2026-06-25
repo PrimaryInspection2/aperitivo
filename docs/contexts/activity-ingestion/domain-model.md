@@ -357,7 +357,7 @@ public class SyncJobWorker {
 }
 ```
 
-> Rate-limit governance (budget tracking, 429 backoff, fair-share across users) and the per-user token-refresh lock are mechanics detailed in their own technical notes ([strava-rate-limits.md](../../technical-notes/strava-rate-limits.md) — *to be written*, [token-management.md](../../technical-notes/token-management.md)); this BC doc fixes the contract, not the mechanism.
+> Rate-limit governance (budget tracking, 429 backoff, fair-share across users) and the per-user token-refresh lock are mechanics detailed in their own technical notes ([strava-rate-limits.md](../../technical-notes/strava-rate-limits.md), [token-management.md](../../technical-notes/token-management.md)); this BC doc fixes the contract, not the mechanism.
 
 ### BackfillService and ReconciliationService — the other two sources
 

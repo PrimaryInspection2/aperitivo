@@ -172,4 +172,4 @@ Error bodies for the JSON API follow the project-wide [API error conventions](..
 - Sequence diagram: `diagrams/sequence/strava-oauth-login.md` — the full login flow with the event emit points
 - [domain-model.md](domain-model.md), [database.md](database.md), [events.md](events.md) — already written
 - [token-management.md](../../technical-notes/token-management.md) — already written
-- [jwt-and-keys.md](../../technical-notes/jwt-and-keys.md) — *to be written* — `JwtEncoder`/`JwtDecoder` setup, RS256 key loading, JWKS, `jti` blacklist
+- [jwt-and-keys.md](../../technical-notes/jwt-and-keys.md) — `JwtEncoder`/`JwtDecoder` setup, RS256 key loading, JWKS, `jti` blacklist

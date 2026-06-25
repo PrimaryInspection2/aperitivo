@@ -160,4 +160,4 @@ The JSON parts of this surface (the `400`/`401` on the webhook `POST`) follow th
 
 - Sequence diagrams: `diagrams/sequence/activity-ingestion-webhook.md` (webhook → SyncJob → Catalog → …), `initial-backfill.md` (paginated history sync on connect)
 - [domain-model.md](domain-model.md), [database.md](database.md), [events.md](events.md) — already written
-- [strava-rate-limits.md](../../technical-notes/strava-rate-limits.md) — *to be written* — budget tracking, backoff, fair-share (referenced by the worker)
+- [strava-rate-limits.md](../../technical-notes/strava-rate-limits.md) — budget tracking, backoff, fair-share (referenced by the worker)
