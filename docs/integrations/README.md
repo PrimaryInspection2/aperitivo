@@ -6,10 +6,10 @@ External systems Aperitivo integrates with, and the specifics of how.
 
 The primary (and only MVP) external dependency. See [strava/](strava/) for:
 
-- **[OAuth flow](strava/oauth-flow.md)** — *to be written* — authorization, callback, code exchange, refresh
-- **[API quirks](strava/api-quirks.md)** — *to be written* — rate limits, webhook delivery characteristics, undocumented behaviors
-- **[Data model mapping](strava/data-model-mapping.md)** — *to be written* — how Strava's activity JSON maps to our canonical Workout
-- **[Webhook configuration](strava/webhooks.md)** — *to be written* — subscription setup, verification, deauth handling
+- **[OAuth flow](strava/oauth-flow.md)** — authorization, callback, code exchange, refresh, scopes, deauth
+- **[API quirks](strava/api-quirks.md)** — rate limits, headers, pagination, webhook delivery, undocumented behaviors
+- **[Data model mapping](strava/data-model-mapping.md)** — Strava activity JSON → canonical Workout, tier by tier
+- **[Webhook configuration](strava/webhooks.md)** — subscription, validation handshake, delivery, deauth
 
 Identity is handled in-app by Spring Security (Strava OAuth2 login + our own JWT issuer) — there is no external identity server. See [ADR 0009](../adr/0009-identity-spring-security.md).
 
