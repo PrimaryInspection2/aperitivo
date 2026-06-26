@@ -24,9 +24,9 @@ diagrams/
 
 We use the [C4 model](https://c4model.com/) (Simon Brown). Three levels in this project:
 
-- **Level 1 — System Context.** Aperitivo as a black box, surrounded by users and external systems (Strava API). [c4/level-1-system-context.md](c4/level-1-system-context.md) — *to be written*
-- **Level 2 — Containers.** Internal high-level deployment units: modular monolith app, Postgres+TimescaleDB, Redis, OTel collector, Grafana stack. [c4/level-2-containers.md](c4/level-2-containers.md) — *to be written*
-- **Level 3 — Components per BC.** One per Bounded Context, showing internal components and their relationships. [c4/level-3-components-{bc}.md](c4/) — *to be written per BC*
+- **Level 1 — System Context.** Aperitivo as a black box, surrounded by users and external systems (Strava API). [level-1-system-context.md](../../../diagrams/c4/level-1-system-context.md) — ✅ written
+- **Level 2 — Containers.** Internal high-level deployment units: modular monolith app, Postgres+TimescaleDB, Redis, OTel collector, Grafana stack. [level-2-containers.md](../../../diagrams/c4/level-2-containers.md) — ✅ written
+- **Level 3 — Components.** The six Bounded Contexts inside the app and their event/port relationships. [level-3-components.md](../../../diagrams/c4/level-3-components.md) — ✅ written
 
 We do **not** maintain Level 4 (Code). Source code is the authoritative artifact at that level.
 
@@ -39,8 +39,8 @@ Each BC owns its sequence diagrams under `contexts/{bc}/diagrams/sequence/`. Cur
 | [strava-oauth-login.md](../contexts/identity-access/diagrams/sequence/strava-oauth-login.md) | Identity & Access | ✅ written |
 | [activity-ingestion-webhook.md](../../activity-ingestion/diagrams/sequence/activity-ingestion-webhook.md) | Activity Ingestion | ✅ written |
 | [initial-backfill.md](../../activity-ingestion/diagrams/sequence/initial-backfill.md) | Activity Ingestion | ✅ written |
-| `token-refresh.md` | Identity & Access | *to be written* |
-| `revocation-flow.md` | Identity & Access | *to be written* |
+| [token-refresh.md](../contexts/identity-access/diagrams/sequence/token-refresh.md) | Identity & Access | ✅ written |
+| [revocation-flow.md](../contexts/identity-access/diagrams/sequence/revocation-flow.md) | Identity & Access | ✅ written |
 
 ## Cross-BC ERDs
 
