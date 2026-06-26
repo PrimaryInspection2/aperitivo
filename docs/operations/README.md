@@ -4,16 +4,16 @@ Runtime concerns for Aperitivo: observability, security, deployment, and inciden
 
 ## Documents
 
-- [Observability](observability.md) — OpenTelemetry, metrics, logs, traces, dashboards — *to be written*
-- [Security](security.md) — threat model, secrets management, encryption-at-rest, audit logging — *to be written*
-- [Deployment](deployment.md) — Docker Compose layout, configuration, environment variables — *to be written*
-- [Runbooks](runbooks/) — incident response playbooks — *to be added*
+- [Observability](observability.md) — OpenTelemetry, metrics, traces, logs, dashboards, alerts
+- [Security](security.md) — threat model, attack surface, secrets management, audit logging
+- [Deployment](deployment.md) — Docker Compose topology, configuration, migrations, scaling notes
+- [Runbooks](runbooks/) — incident response playbooks (below)
 
-## Anticipated runbooks
+## Runbooks
 
-- `runbooks/strava-rate-limit-exceeded.md` — what to do when we hit the 15-min or daily quota
-- `runbooks/ingestion-lag-alert.md` — when ingestion is falling behind
-- `runbooks/token-refresh-failures.md` — pattern of refresh failures across many users
-- `runbooks/event-processing-lag.md` — Spring Modulith event listeners falling behind (incomplete `event_publication` rows accumulating); the in-process analogue of consumer lag
-- `runbooks/database-connection-saturation.md`
-- `runbooks/deauthorization-storm.md` — many users revoking at once (e.g. after a Strava ToS change)
+- [strava-rate-limit-exceeded](runbooks/strava-rate-limit-exceeded.md) — hitting the 15-min or daily quota
+- [ingestion-lag-alert](runbooks/ingestion-lag-alert.md) — ingestion falling behind
+- [token-refresh-failures](runbooks/token-refresh-failures.md) — refresh failures across many users
+- [event-processing-lag](runbooks/event-processing-lag.md) — Modulith listeners behind (incomplete `event_publication` rows); the in-process analogue of consumer lag
+- [database-connection-saturation](runbooks/database-connection-saturation.md) — shared-Postgres pool exhaustion
+- [deauthorization-storm](runbooks/deauthorization-storm.md) — many users revoking at once (and how to tell a real storm from our-side credential failure)

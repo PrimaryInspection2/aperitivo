@@ -110,7 +110,7 @@ Note: a `Workout` corresponds 1:1 to a Strava activity in MVP, but the model doe
 
 **ScheduledSession** — a planned workout for a specific date. Has `PlannedTarget`s (e.g. "60 minutes Z2 run, 8 km").
 
-**PlannedTarget** — a specific intended attribute of a scheduled session (distance, duration, pace zone, power zone, TSS). *(Note: whether a TSS-valued target couples Planning to an Analytics-owned metric is an open question resolved at the Planning BC deep-dive — see the bounded-contexts overview.)*
+**PlannedTarget** — a specific intended attribute of a scheduled session (distance, duration, pace zone, power zone, TSS). A TSS-valued target stores a **planned number Planning owns** (authoring intent); MVP compliance is computed from directly-readable workout dimensions and does **not** read Analytics' actual TSS — so there is no cross-BC coupling. See the [Planning domain-model](../contexts/training-planning/domain-model.md).
 
 **Compliance** — how well the actual completed workout matched the planned session. Computed as a similarity score plus per-target deltas.
 
