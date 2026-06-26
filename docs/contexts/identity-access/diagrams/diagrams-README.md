@@ -37,8 +37,8 @@ Each BC owns its sequence diagrams under `contexts/{bc}/diagrams/sequence/`. Cur
 | Diagram | BC | Status |
 |---|---|---|
 | [strava-oauth-login.md](../contexts/identity-access/diagrams/sequence/strava-oauth-login.md) | Identity & Access | ✅ written |
-| `activity-ingestion-webhook.md` | Activity Ingestion | *to be written* |
-| `initial-backfill.md` | Activity Ingestion | *to be written* |
+| [activity-ingestion-webhook.md](../../activity-ingestion/diagrams/sequence/activity-ingestion-webhook.md) | Activity Ingestion | ✅ written |
+| [initial-backfill.md](../../activity-ingestion/diagrams/sequence/initial-backfill.md) | Activity Ingestion | ✅ written |
 | `token-refresh.md` | Identity & Access | *to be written* |
 | `revocation-flow.md` | Identity & Access | *to be written* |
 

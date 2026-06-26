@@ -76,4 +76,4 @@ The diagram is the **first-time sign-up** (UC-1), where both events fire. The tw
 - [api.md](../../api.md) — endpoint surface, cookie/Bearer auth model
 - [events.md](../../events.md) — `UserRegisteredEvent` / `IntegrationConnectedEvent` contracts
 - [token-management.md](../../../../technical-notes/token-management.md) — what happens to the stored tokens afterwards
-- [initial-backfill.md](../../../activity-ingestion/diagrams/sequence/initial-backfill.md) — *to be written* — the backfill that phase 6 triggers
+- [initial-backfill.md](../../../activity-ingestion/diagrams/sequence/initial-backfill.md) — the backfill that phase 6 triggers
