@@ -46,7 +46,7 @@ Each BC owns its sequence diagrams under `contexts/{bc}/diagrams/sequence/`. Cur
 
 Per-BC entity-relationship diagrams are co-located with each context. Cross-BC ERDs live here:
 
-- `erd/overview.md` — top-level entity map across all BCs — *to be written*
+- [erd/overview.md](../../../diagrams/erd/overview.md) — top-level entity map across all BCs (real FKs vs cross-BC id-refs) — ✅ written
 
 ## Conventions
 
