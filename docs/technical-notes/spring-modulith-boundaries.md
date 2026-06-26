@@ -193,5 +193,5 @@ Modulith also provides:
 
 - [ADR 0005: Bounded contexts](../adr/0005-bounded-contexts.md) — the modular-monolith decision
 - [ADR 0008: Event transport](../adr/0008-event-transport.md) — in-process events, the Outbox
-- [Idempotency and outbox patterns](idempotency-and-outbox.md) — *to be written* — consumer-side Inbox/dedup detail
+- [Idempotency and outbox patterns](idempotency-and-outbox.md) — consumer-side Inbox/dedup detail
 - [Roadmap, Phase 0](../business/roadmap.md) — `verify()` wired into CI from the start

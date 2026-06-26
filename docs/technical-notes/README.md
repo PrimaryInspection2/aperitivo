@@ -12,5 +12,5 @@ These are longer-form explorations of specific technical areas — implementatio
 - [Encryption at rest](encryption-at-rest.md) — *to be written* — AES-GCM column encryption, key management, envelope encryption with Vault/KMS
 - [Spring Modulith boundaries](spring-modulith-boundaries.md) — module structure, allowed dependencies, `ApplicationModules.verify()` in CI
 - [Strava rate limit governance](strava-rate-limits.md) — budget tracking, backoff, fair-share across users
-- [Idempotency and outbox patterns](idempotency-and-outbox.md) — *to be written* — concrete implementation patterns for Inbox/Outbox in Spring Modulith
+- [Idempotency and outbox patterns](idempotency-and-outbox.md) — Outbox via event_publication, the three consumer dedup patterns, the dedup-key registry
 - [JWT issuance and validation](jwt-and-keys.md) — JwtEncoder setup, RS256 key loading, JWKS endpoint, jti blacklist in Redis
