@@ -27,7 +27,7 @@ sequenceDiagram
     participant DB as notifications schema
     participant PREF as PreferenceService
     participant DEL as DeliveryService
-    participant SSE as SseRegistry<br/>(Map&lt;UserId,List&lt;SseEmitter&gt;&gt;)
+    participant SSE as SseRegistry<br/>(Map of UserId to List of SseEmitter)
     participant SMTP as EmailChannelAdapter
     participant EP as event_publication<br/>(Notifications outbox)
 
@@ -64,7 +64,7 @@ sequenceDiagram
             DEL->>DB: attempt status=SENT
             DEL->>EP: publish NotificationDeliveredEvent{channel=IN_APP}
         else no live connection
-            Note over SSE: nothing to push live —<br/>the inbox row already persists it;<br/>client fetches it on reconnect via REST
+            Note over SSE: nothing to push live —<br/>the inbox row already persists it,<br/>client fetches it on reconnect via REST
             DEL->>DB: attempt status=SENT (inbox is the delivery)
             DEL->>EP: publish NotificationDeliveredEvent{channel=IN_APP}
         end
@@ -84,7 +84,7 @@ sequenceDiagram
         end
     end
 
-    EP-->>EP: AFTER_COMMIT delivery of status events (observability seam; no MVP consumer)
+    EP-->>EP: AFTER_COMMIT delivery of status events (observability seam, no MVP consumer)
 ```
 
 ## Notes keyed to the locked decisions

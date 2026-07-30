@@ -119,13 +119,13 @@ sequenceDiagram
                 Note right of WK: job FAILED → retry/DEAD per policy
             else 429 rate limited
                 SC-->>WK: 429 + Retry-After
-                Note right of WK: backoff; next_attempt_at advanced;<br/>NEVER fetch inside a webhook request
+                Note right of WK: backoff, next_attempt_at advanced.<br/>NEVER fetch inside a webhook request
             else 404
                 SC-->>WK: 404
                 Note right of WK: activity gone — IGNORE/terminal, harmless
             end
         else aspectType = delete
-            Note over WK,SC: no GET — nothing to fetch;<br/>delete-aspect job produces NO RawActivityPayload
+            Note over WK,SC: no GET — nothing to fetch.<br/>delete-aspect job produces NO RawActivityPayload
         end
     end
 
@@ -143,9 +143,9 @@ sequenceDiagram
         Note over RAP,EP: payload row + outbox row commit together —<br/>"stored" and "published" ARE atomic
     end
 
-    Note over WK,EP: ⚠ "fetched" and "published" are NOT atomic.<br/>The GET happened before TX-3. A crash after GET, before store →<br/>job retries; uq_sync_jobs_idempotency makes the re-fetch a no-op.
+    Note over WK,EP: ⚠ "fetched" and "published" are NOT atomic.<br/>The GET happened before TX-3. A crash after GET, before store →<br/>job retries, uq_sync_jobs_idempotency makes the re-fetch a no-op.
 
-    EP-->>DS: AFTER_COMMIT delivery (at-least-once; consumers dedup on activity key)
+    EP-->>DS: AFTER_COMMIT delivery (at-least-once, consumers dedup on activity key)
 ```
 
 ## Notes keyed to the locked decisions

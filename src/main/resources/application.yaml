@@ -1,0 +1,83 @@
+spring:
+  application:
+    name: aperitivo
+
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:aperitivo}
+    username: ${POSTGRES_USER:aperitivo}
+    password: ${POSTGRES_PASSWORD:secret}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  modulith:
+    runtime:
+      flyway-enabled: true
+      verification-enabled: true
+    events:
+      jdbc:
+        schema-initialization:
+          enabled: false
+
+  cloud:
+    openfeign:
+      # Apache HttpClient 5 with a real connection pool.
+      # Enabled via the feign-hc5 dependency in pom.xml.
+      httpclient:
+        hc5:
+          enabled: true
+        max-connections: ${FEIGN_MAX_CONNECTIONS:200}
+        max-connections-per-route: ${FEIGN_MAX_CONNECTIONS_PER_ROUTE:100}
+        # Idle-connection eviction (seconds) — recycle stale sockets.
+        time-to-live: ${FEIGN_TTL_SECONDS:300}
+        # Socket connect timeout when a new pooled connection is created (ms).
+        connection-timeout: ${FEIGN_CONNECT_TIMEOUT_MS:3000}
+      client:
+        config:
+          # Global defaults for all Feign clients.
+          default:
+            connect-timeout: ${FEIGN_CONNECT_TIMEOUT_MS:3000}
+            read-timeout: ${FEIGN_READ_TIMEOUT_MS:10000}
+          # Strava OAuth token exchange / refresh.
+          # Timings MUST fit inside aperitivo.identity.token-refresh-lock.lease-time
+          # so the Redis lock cannot expire mid-call. Worst case here:
+          #   connect (3s) + read (8s) = 11s, versus lease-time 15s → 4s margin.
+          strava-oauth:
+            connect-timeout: ${STRAVA_OAUTH_CONNECT_TIMEOUT_MS:3000}
+            read-timeout: ${STRAVA_OAUTH_READ_TIMEOUT_MS:8000}
+
+aperitivo:
+  provider:
+    strava:
+      client-id: ${STRAVA_CLIENT_ID:dev-client-id}
+      client-secret: ${STRAVA_CLIENT_SECRET:dev-client-secret}
+      redirect-uri: ${STRAVA_REDIRECT_URI:http://localhost:8080/strava/oauth/callback}
+      api:
+        url: https://www.strava.com/api/v3
+      oauth:
+        url: https://www.strava.com/oauth/token
+
+  identity:
+    encryption:
+      key: ${AES_GCM_SECRET}
+    token-refresh:
+      expiration-buffer: ${IAM_TOKEN_EXPIRATION_BUFFER:60s}
+      retry:
+        max-attempts: ${IAM_RETRY_MAX_ATTEMPTS:3}
+        initial-delay-ms: ${IAM_RETRY_INITIAL_DELAY_MS:50}
+        multiplier: ${IAM_RETRY_MULTIPLIER:2.0}
+    token-refresh-lock:
+      wait-time: ${TOKEN_REFRESH_LOCK_WAIT:5s}
+      lease-time: ${TOKEN_REFRESH_LOCK_LEASE:15s}
+    audit-executor:
+      core-pool-size: ${IAM_AUDIT_CORE_POOL_SIZE:2}
+      max-pool-size: ${IAM_AUDIT_MAX_POOL_SIZE:4}
+      queue-capacity: ${IAM_AUDIT_QUEUE_CAPACITY:500}
+      thread-name-prefix: iam-audit-

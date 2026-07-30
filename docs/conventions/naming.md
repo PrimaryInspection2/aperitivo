@@ -42,7 +42,7 @@ Per the project-wide style (Spring layered, not tactical DDD): `…Entity` class
 Within each BC module, separate the public contract from internals so Spring Modulith can enforce boundaries:
 
 ```
-com.aperitivo.<bc>
+dev.amishko.aperitivo.<bc>
 ├── api/         ← published interface: DTOs, service interfaces, events other BCs consume
 └── internal/    ← entities, repositories, service impls, controllers
 ```

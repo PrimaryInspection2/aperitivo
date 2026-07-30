@@ -13,6 +13,7 @@ Format adapted from [Michael Nygard's original ADR template](https://github.com/
 - **Append-only.** ADRs are never deleted. If a decision is reversed, a new ADR is added that **supersedes** the old one (and the old one is marked as superseded with a forward link).
 - **Numbering.** Strictly sequential, 4-digit, zero-padded (`0001`, `0002`, ...).
 - **Status:** `Proposed` → `Accepted` → `Superseded by NNNN` (or `Deprecated` if simply abandoned).
+- **Superseded file naming.** When an ADR is superseded, its filename is renamed to append the `-superseded` suffix (e.g. `0002-identity-model.md` → `0002-identity-model-superseded.md`). The original number is kept; the suffix is a visual signal in file listings that the ADR is no longer authoritative. Rename via `git mv` so history is preserved.
 - **One decision per ADR.** If a "decision" turns out to bundle multiple independent choices, split it.
 
 ## Index
@@ -20,7 +21,7 @@ Format adapted from [Michael Nygard's original ADR template](https://github.com/
 | # | Title | Status |
 |---|---|---|
 | [0001](0001-no-strava-live-streaming.md) | No realtime live-streaming from Strava | Accepted |
-| [0002](0002-identity-model.md) | "Sign in with Strava" via Keycloak custom Authenticator SPI | Superseded by [0009](0009-identity-spring-security.md) |
+| [0002](0002-identity-model-superseded.md) | "Sign in with Strava" via Keycloak custom Authenticator SPI | Superseded by [0009](0009-identity-spring-security.md) |
 | [0003](0003-token-storage-strategy.md) | Strava tokens stored in backend (Postgres, AES-GCM) | Accepted |
 | [0004](0004-user-model-and-connected-sources.md) | Internal user UUID + ConnectedSource entity | Accepted |
 | [0005](0005-bounded-contexts.md) | Bounded Context decomposition for MVP | Accepted |

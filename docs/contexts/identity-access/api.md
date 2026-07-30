@@ -68,15 +68,22 @@ sequenceDiagram
     participant IAM as IAM services
 
     B->>SS: GET /oauth2/authorization/strava
-    SS->>Strava: redirect to authorize (client_id, scopes, state)
-    Strava-->>B: user approves
-    Strava->>SS: GET /login/oauth2/code/strava?code&state
-    SS->>Strava: exchange code → access+refresh tokens
-    SS->>IAM: OAuth2UserService: load GET /api/v3/athlete
-    SS->>IAM: success handler → StravaOAuthService.handleCallback(...)
+    SS-->>B: 302 redirect to Strava authorize (client_id, scopes, state)
+    B->>Strava: GET /oauth/authorize
+    Strava-->>B: consent page
+    B->>Strava: user approves
+    Strava-->>B: 302 redirect to /login/oauth2/code/strava?code=...&state=...
+    B->>SS: GET /login/oauth2/code/strava?code=...&state=...
+    SS->>Strava: POST /oauth/token (exchange code)
+    Strava-->>SS: access + refresh tokens
+    SS->>IAM: OAuth2UserService.loadUser(...)
+    IAM->>Strava: GET /api/v3/athlete
+    Strava-->>IAM: athlete profile
+    IAM-->>SS: StravaProfile (OAuth2User)
+    SS->>IAM: success handler -> StravaOAuthService.handleCallback(...)
     Note over IAM: resolve/create User, create ConnectedSource (encrypted),<br/>publish UserRegistered + IntegrationConnected
     IAM-->>SS: UserEntity
-    SS-->>B: Set-Cookie: token=<JWT>; redirect to /
+    SS-->>B: Set-Cookie token=JWT + 302 redirect to /
 ```
 
 ### `GET /oauth2/authorization/strava` — initiate

@@ -2,11 +2,11 @@
 
 - **Status:** Accepted
 - **Date:** 2026-06-14
-- **Supersedes:** [ADR 0002](0002-identity-model.md)
+- **Supersedes:** [ADR 0002](0002-identity-model-superseded.md)
 
 ## Context
 
-[ADR 0002](0002-identity-model.md) decided that identity would be issued by **Keycloak**, bridged to Strava via a **custom Keycloak Authenticator SPI**. On review, that decision was reconsidered.
+[ADR 0002](0002-identity-model-superseded.md) decided that identity would be issued by **Keycloak**, bridged to Strava via a **custom Keycloak Authenticator SPI**. On review, that decision was reconsidered.
 
 Aperitivo's login is **passwordless**: every user authenticates by completing a Strava OAuth flow. There is no password, no email/password registration, no "forgot password" in the MVP. This makes most of Keycloak's feature surface inapplicable:
 
@@ -67,7 +67,7 @@ The JWT we emit is a standard OIDC-style JWT, so the choice of issuer is an inte
 
 ## References
 
-- [ADR 0002: Identity model (superseded)](0002-identity-model.md)
+- [ADR 0002: Identity model (superseded)](0002-identity-model-superseded.md)
 - [ADR 0003: Token storage strategy](0003-token-storage-strategy.md)
 - [ADR 0004: User model and ConnectedSource](0004-user-model-and-connected-sources.md)
 - [Spring Security — OAuth2 Client](https://docs.spring.io/spring-security/reference/servlet/oauth2/client/index.html)

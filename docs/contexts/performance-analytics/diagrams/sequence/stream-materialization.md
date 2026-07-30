@@ -48,15 +48,15 @@ sequenceDiagram
 
     SM->>TL: applyNewWorkout(event)
     Note over TL: compute per-workout load (power→TSS / HR→TRIMP / duration fallback)
-    TL->>DTL: upsert (user_id, day) load; roll CTL/ATL/TSB forward to today
+    TL->>DTL: upsert (user_id, day) load, roll CTL/ATL/TSB forward to today
 
     SM->>PR: evaluate(event, payload)
-    Note over PR: compute power/pace curve from streams; compare to current bests
+    Note over PR: compute power/pace curve from streams, compare to current bests
     alt new best achieved
         PR->>EP: publish PersonalRecordSetEvent{recordType, value, previousValue, …}
         EP-->>NOT: AFTER_COMMIT → "New 5k PR!" notification
     else no new record
-        Note over PR: curve/PR rows updated; no event
+        Note over PR: curve/PR rows updated, no event
     end
 ```
 

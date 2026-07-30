@@ -43,7 +43,7 @@ sequenceDiagram
 
     Note over SS,B: 5 — JWT issuance (success handler)
     SS->>SS: mint RS256 JWT (sub=user_id, iss, iat, exp, jti)
-    SS-->>B: 302 → / · Set-Cookie: token=JWT; HttpOnly; Secure; SameSite=Lax
+    SS-->>B: 302 to / with Set-Cookie token=JWT (HttpOnly, Secure, SameSite=Lax)
 
     Note over EP,ING: 6 — After commit (async, at-least-once)
     EP-)ING: deliver IntegrationConnectedEvent

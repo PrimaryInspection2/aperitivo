@@ -48,7 +48,7 @@ See [Bounded Contexts](bounded-contexts.md) for the full decomposition.
 
 | Layer | Choice | Why |
 |---|---|---|
-| Language | Java 21 | Virtual threads, pattern matching, records |
+| Language | Java 25 | Virtual threads, pattern matching, records |
 | Framework | Spring Boot 4, Spring Modulith | Modular monolith with enforced boundaries and in-process events |
 | Persistence | PostgreSQL + TimescaleDB extension | Single OLTP DB for most BCs; TimescaleDB hypertables for time-series metrics in Analytics |
 | Inter-BC events | Spring Modulith application events (`event_publication` table) | Durable, transactional, in-process; no broker. Kafka-ready design, externalized later if needed |

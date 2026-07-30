@@ -1,0 +1,13 @@
+services:
+  postgres:
+    image: 'timescale/timescaledb:latest-pg17'
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+  redis:
+    image: 'redis:latest'
+    ports:
+      - '${REDIS_PORT:-6379}:6379'

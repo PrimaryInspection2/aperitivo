@@ -35,7 +35,7 @@ sequenceDiagram
     participant AN as Analytics (downstream)
 
     ING-->>NS: @ApplicationModuleListener ActivityIngestedEvent<br/>{provider, providerActivityId, rawPayloadId, aspectType, userId}
-    Note over NS: AFTER_COMMIT of Ingestion's write —<br/>at-least-once; handler must be idempotent
+    Note over NS: AFTER_COMMIT of Ingestion's write —<br/>at-least-once, handler must be idempotent
 
     NS->>RPR: read(rawPayloadId)
     RPR-->>NS: raw Strava activity JSON (from archive, no Strava call)
@@ -57,13 +57,13 @@ sequenceDiagram
             NS->>WR: findByProviderActivity(provider, providerActivityId)
             NS->>NS: re-map summary + rebuild child collections<br/>(orphanRemoval clears replaced laps/efforts)
             NS->>WR: save(WorkoutEntity)  %% @Version guards concurrent re-normalization
-            WR->>DB: UPDATE workouts; DELETE+INSERT children via orphanRemoval
+            WR->>DB: UPDATE workouts (DELETE+INSERT children via orphanRemoval)
             NS->>EP: publish WorkoutUpdatedEvent{…, rawPayloadId, occurredAt}
         end
     end
 
     EP-->>AN: AFTER_COMMIT delivery → Analytics reads tier-3 streams<br/>from archive by rawPayloadId (separate flow)
-    Note over AN: Catalog handed off rawPayloadId; Analytics owns<br/>per-second materialization. Catalog never stored a sample.
+    Note over AN: Catalog handed off rawPayloadId. Analytics owns<br/>per-second materialization. Catalog never stored a sample.
 ```
 
 ## Notes keyed to the locked decisions

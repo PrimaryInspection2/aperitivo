@@ -41,13 +41,13 @@ sequenceDiagram
     else candidates exist
         Note over SM: SCORING — resolve ambiguity (e.g. 2 runs same day)
         SM->>SM: score each (session, workout) pair:<br/>date proximity + sport exactness + target similarity
-        SM->>SM: pick best pair; skip sessions already manual-matched;<br/>each session ↔ at most one workout (greedy by score)
+        SM->>SM: pick best pair, skip sessions already manual-matched.<br/>each session ↔ at most one workout (greedy by score)
 
         alt a winning match
             Note over SM,DB: COMPLIANCE — directly-readable dimensions only (NO actual TSS)
             SM->>SM: per-target delta (planned vs workout distance/duration/pace)
-            SM->>DB: set matched_workout_id, match_is_manual=false,<br/>compliance_score; status=COMPLETED
-            SM->>DB: INSERT compliance_deltas (per target; no TSS row in MVP)
+            SM->>DB: set matched_workout_id, match_is_manual=false,<br/>compliance_score, status=COMPLETED
+            SM->>DB: INSERT compliance_deltas (per target, no TSS row in MVP)
             SM->>EP: publish SessionCompletedEvent{sessionId, matchedWorkoutId, complianceScore, manualMatch=false}
             EP-->>NOT: AFTER_COMMIT → "Session complete — 92% to plan"
         else best score below threshold
@@ -74,7 +74,7 @@ sequenceDiagram
             SM->>DB: update compliance_score + deltas
         else was matched, automatic
             SM->>SM: re-run candidate select + score (dimensions changed)
-            SM->>DB: keep / move match; update compliance
+            SM->>DB: keep / move match, update compliance
             SM->>EP: publish SessionCompleted (if match changed)
         else not previously matched
             Note over SM: treat as a fresh match attempt (like create)
@@ -83,7 +83,7 @@ sequenceDiagram
         CAT-->>SM: WorkoutDeletedEvent{workoutId}
         SM->>DB: find session matched to this workout
         alt found
-            SM->>DB: clear matched_workout_id; status back to PLANNED;<br/>delete compliance_deltas
+            SM->>DB: clear matched_workout_id, status back to PLANNED,<br/>delete compliance_deltas
             Note over SM: session may later go MISSED if its window has passed
         else none
             Note over SM: no-op

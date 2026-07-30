@@ -62,13 +62,13 @@ sequenceDiagram
                 CSS->>CSR: status = REVOKED
                 CSS->>EP: publish IntegrationRevokedEvent{reason=TOKEN_REJECTED}
                 TM-->>ING: throw IntegrationNotActiveException
-                Note over EP: → Ingestion cancels jobs; Notifications tells user to reconnect
+                Note over EP: Ingestion cancels jobs, Notifications tells user to reconnect
             else timeout / 5xx (Strava-side)
                 ST-->>TM: error
                 TM->>LK: release lock
                 TM->>CSS: recordFailure(userId, REFRESH_ERROR)
-                TM-->>ING: throw (job retries with backoff; token not revoked)
-                Note over TM: not a revocation — existing access tokens still valid<br/>until expiry; see token-refresh-failures runbook
+                TM-->>ING: throw (job retries with backoff, token not revoked)
+                Note over TM: not a revocation — existing access tokens still valid<br/>until expiry (see token-refresh-failures runbook)
             end
         end
     end

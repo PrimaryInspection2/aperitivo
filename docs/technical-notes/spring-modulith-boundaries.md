@@ -23,7 +23,7 @@ Each Bounded Context is a Spring Modulith **application module** = a direct sub-
 application root:
 
 ```
-com.aperitivo
+dev.amishko.aperitivo
 ├── identity              ← Identity & Access BC
 ├── ingestion             ← Activity Ingestion BC
 ├── catalog               ← Workout Catalog BC
@@ -35,9 +35,9 @@ com.aperitivo
 
 The rule Modulith applies by default:
 
-- **The base package of a module is its API.** Types directly in `com.aperitivo.catalog` are
+- **The base package of a module is its API.** Types directly in `dev.amishko.aperitivo.catalog` are
   visible to other modules.
-- **Sub-packages are internal.** Types in `com.aperitivo.catalog.internal` (entities, repositories,
+- **Sub-packages are internal.** Types in `dev.amishko.aperitivo.catalog.internal` (entities, repositories,
   service implementations) are **not** allowed to be referenced from another module. A reference
   from `planning` into `catalog.internal` is a verification failure.
 
@@ -48,7 +48,7 @@ service impls under `catalog.internal`, and no other BC can touch them — the c
 ### Suggested per-BC internal layout
 
 ```
-com.aperitivo.catalog
+dev.amishko.aperitivo.catalog
 ├── WorkoutCreatedEvent.java        ← published event (API — other modules consume it)
 ├── RawPayloadReader.java           ← NO: that's Ingestion's port; shown for contrast
 ├── package-info.java               ← @ApplicationModule metadata (optional)
@@ -75,7 +75,7 @@ Three legal channels between BCs, all visible in the docs, all enforceable here:
    - IAM's `TokenManager.getValidAccessToken(userId)` — Ingestion's only synchronous reach into IAM.
    - Ingestion's `RawPayloadReader.read(rawPayloadId)` — how Catalog and Analytics read the archived
      payload without HTTP.
-3. **Shared kernel** (`com.aperitivo.shared`) — a small set of types every module may depend on:
+3. **Shared kernel** (`dev.amishko.aperitivo.shared`) — a small set of types every module may depend on:
    `UserId`/value objects, the `SportType` enum (Catalog's, promoted to shared because Planning
    reuses it as ubiquitous language), common error types. The shared module depends on **nothing**.
 

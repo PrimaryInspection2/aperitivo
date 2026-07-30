@@ -55,7 +55,7 @@ sequenceDiagram
 
     Note over EP,NOT: FAN-OUT — AFTER_COMMIT, at-least-once
     EP-->>ING: IntegrationRevokedEvent
-    Note over ING: cancel pending SyncJobs for this user;<br/>stop issuing Strava calls. Idempotent — no dedup key needed.
+    Note over ING: cancel pending SyncJobs for this user,<br/>stop issuing Strava calls. Idempotent — no dedup key needed.
     EP-->>NOT: IntegrationRevokedEvent
     Note over NOT: notify "reconnect your Strava".<br/>Real side effect (email) → dedup on connectedSourceId.
 ```

@@ -1,0 +1,20 @@
+spring:
+  modulith:
+    runtime:
+      # Disabled in tests: Spring Modulith's per-module Flyway strategy hijacks
+      # Boot's autoconfig and prevents migrations from running in the IT context.
+      # Use Boot's built-in Flyway autoconfig directly instead.
+      flyway-enabled: false
+  flyway:
+    # Boot's Flyway runs a single instance against classpath:db/migration/identity.
+    # Under this location we ship a test-only V4 mirror of __root/V1 so the
+    # Modulith event_publication outbox table exists — required as soon as
+    # anything subscribes to @TransactionalEventListener(AFTER_COMMIT), which
+    # RecordedEvents does.
+    locations: classpath:db/migration/identity
+
+aperitivo:
+  identity:
+    encryption:
+      # 32 zero bytes → Base64. Deterministic test key, NEVER used in prod.
+      key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=

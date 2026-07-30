@@ -70,7 +70,7 @@ sequenceDiagram
             BF->>SS: advance cursor to newest activity on page<br/>(last_synced_at, last_synced_activity_id, @Version)
         else 429 rate limited
             SC-->>BF: 429 + Retry-After
-            Note right of BF: pause per Retry-After, resume same page;<br/>backfill is throttled, never abandoned
+            Note right of BF: pause per Retry-After, resume same page.<br/>backfill is throttled, never abandoned
         else empty / short page
             SC-->>BF: [] (no more)
             Note right of BF: pagination complete
