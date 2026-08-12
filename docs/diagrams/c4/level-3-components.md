@@ -11,7 +11,7 @@ We do **not** maintain Level 4 (Code) — source is the authoritative artifact t
 ## What this shows
 
 The six BCs as components, the **events** that flow between them (the asynchronous backbone), and the
-two **published ports** (synchronous in-process reads). This is the same decomposition as the
+three **published ports** (synchronous in-process reads). This is the same decomposition as the
 [bounded-contexts overview](../../architecture/bounded-contexts.md) and the
 [event catalog](../../events/catalog.md), drawn as a component view.
 
@@ -19,10 +19,11 @@ two **published ports** (synchronous in-process reads). This is the same decompo
 
 ```mermaid
 flowchart TB
-    Strava["🏃 Strava (external)"]
+    Google["🔑 Google (external IdP)"]
+    Strava["🏃 Strava (external data source)"]
 
     subgraph App["Aperitivo App (modular monolith)"]
-        IAM["<b>Identity & Access</b><br/>OAuth login, JWT issuer,<br/>ConnectedSource, TokenManager"]
+        IAM["<b>Identity & Access</b><br/>OIDC login (Google), JWT issuer,<br/>UserIdentity, ConnectedSource, TokenManager"]
         ING["<b>Activity Ingestion</b><br/>webhooks, SyncJobs, rate limits,<br/>RawActivityPayload archive"]
         CAT["<b>Workout Catalog</b><br/>canonical Workout (tiers 1–2),<br/>normalization"]
         ANA["<b>Performance Analytics</b><br/>tier-3 streams (TimescaleDB),<br/>CTL/ATL/TSB, PRs"]
@@ -31,12 +32,14 @@ flowchart TB
     end
 
     %% external
-    Strava -->|OAuth/REST| IAM
+    Google -->|OIDC login| IAM
+    Strava -->|OAuth connect / REST| IAM
     Strava -->|webhooks| ING
     ING -->|"GET activities (TokenManager port)"| Strava
 
     %% synchronous published ports (read)
     IAM -. "TokenManager port (read token)" .-> ING
+    IAM -. "UserContactReader port (read email)" .-> NOT
     ING -. "RawPayloadReader port (read archive)" .-> CAT
     ING -. "RawPayloadReader port (read archive)" .-> ANA
 
@@ -58,7 +61,7 @@ in-process published port (a read). Solid arrows to/from Strava = external HTTP.
 
 | Component (BC) | Role | Owns |
 |---|---|---|
-| **Identity & Access** | identity + credentials | User, ConnectedSource, TokenManager, JWT issuer |
+| **Identity & Access** | identity + credentials | User, UserIdentity, ConnectedSource, TokenManager, JWT issuer |
 | **Activity Ingestion** | anti-corruption layer to Strava | WebhookEvent, SyncJob, RawActivityPayload, SyncState |
 | **Workout Catalog** | canonical workout structure (tiers 1–2) | Workout aggregate (laps/efforts), normalization |
 | **Performance Analytics** | tier-3 + derived metrics | activity_samples hypertable, CTL/ATL/TSB, PRs, curves |
@@ -72,8 +75,13 @@ after commit. This is most inter-BC flow. The full contracts are in the
 [event catalog](../../events/catalog.md); the dependency graph is **acyclic** and enforced by
 `ApplicationModules.verify()` ([spring-modulith-boundaries.md](../../technical-notes/spring-modulith-boundaries.md)).
 
-**Synchronous — published ports** (narrow reads). Two only:
+**Synchronous — published ports** (narrow reads). Three only:
 - **IAM's `TokenManager`** — Ingestion's sole synchronous reach into IAM, for hot-path token access.
+- **IAM's `UserContactReader`** — how Notifications obtains the recipient address for outbound
+  email. Read at delivery time and never copied into the Notifications schema; a port rather than an
+  event field, because the address would otherwise be serialized into `event_publication` by four
+  producing BCs that have no business holding it
+  ([IAM domain-model](../../contexts/identity-access/domain-model.md)).
 - **Ingestion's `RawPayloadReader`** — how Catalog and Analytics read the archived payload (by
   `rawPayloadId`) without HTTP.
 
@@ -82,6 +90,11 @@ a boundary — those are id-refs, enforced at build time.
 
 ## Key facts at this level
 
+- **Login and connect are different flows into IAM.** Google authenticates the user (OIDC login →
+  `UserIdentity`), while Strava is connected later as a data source (OAuth link flow →
+  `ConnectedSource`). Login never touches `connected_sources`, and `IntegrationConnected` — not
+  signup — is what triggers ingestion backfill
+  ([ADR 0011](../../adr/0011-identity-provider-signup.md)).
 - **Notifications is a pure sink; IAM is a pure source.** Notifications consumes from everyone and is
   consumed by no one; IAM originates identity. No cycles.
 - **Catalog ↔ Analytics is the deliberate counterweight pair.** Catalog is the association playground

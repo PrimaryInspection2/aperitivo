@@ -37,12 +37,12 @@ The rule Modulith applies by default:
 
 - **The base package of a module is its API.** Types directly in `dev.amishko.aperitivo.catalog` are
   visible to other modules.
-- **Sub-packages are internal.** Types in `dev.amishko.aperitivo.catalog.internal` (entities, repositories,
+- **Sub-packages are internal.** Types in `dev.amishko.aperitivo.catalog` (entities, repositories,
   service implementations) are **not** allowed to be referenced from another module. A reference
-  from `planning` into `catalog.internal` is a verification failure.
+  from `planning` into `catalog` is a verification failure.
 
 So the physical layout encodes the boundary: put the `WorkoutEntity`, `WorkoutRepository`, and
-service impls under `catalog.internal`, and no other BC can touch them — the compiler allows it, but
+service impls under `catalog`, and no other BC can touch them — the compiler allows it, but
 `verify()` does not.
 
 ### Suggested per-BC internal layout
@@ -73,6 +73,8 @@ Three legal channels between BCs, all visible in the docs, all enforceable here:
 2. **Published ports / named interfaces** (synchronous read) — a narrow interface in a module's base
    package, deliberately exposed. Examples in this system:
    - IAM's `TokenManager.getValidAccessToken(userId)` — Ingestion's only synchronous reach into IAM.
+   - IAM's `UserContactReader.emailFor(userId)` — Notifications' only synchronous reach into IAM,
+     for the recipient address of outbound email.
    - Ingestion's `RawPayloadReader.read(rawPayloadId)` — how Catalog and Analytics read the archived
      payload without HTTP.
 3. **Shared kernel** (`dev.amishko.aperitivo.shared`) — a small set of types every module may depend on:

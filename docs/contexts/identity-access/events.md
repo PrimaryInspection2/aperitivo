@@ -8,15 +8,27 @@ Conventions in force: [events/conventions.md](../../events/conventions.md), cata
 
 | Event | Logical name | Emitted by | When |
 |---|---|---|---|
-| `UserRegisteredEvent` | `user-registered.v1` | `StravaOAuthService` | a new `UserEntity` is created (first login only) |
-| `IntegrationConnectedEvent` | `integration-connected.v1` | `StravaOAuthService` | a `ConnectedSourceEntity` becomes `ACTIVE` (first connect or reconnect) |
+| `UserRegisteredEvent` | `user-registered.v1` | `LoginService` | a new `UserEntity` is created (first login only) |
+| `IntegrationConnectedEvent` | `integration-connected.v1` | `ConnectedSourceService` | a `ConnectedSourceEntity` transitions to `ACTIVE` (connect or reconnect) |
 | `IntegrationRevokedEvent` | `integration-revoked.v1` | `ConnectedSourceService` | a source transitions `ACTIVE → REVOKED` |
+
+### The two lifecycles are no longer simultaneous
+
+This is the most important change [ADR 0011](../../adr/0011-identity-provider-signup.md) makes to this contract, and it is invisible in the payloads.
+
+Previously, signing up **was** connecting Strava: both events left the same transaction, microseconds apart, and "a user exists" and "that user has a data source" were the same fact. Now signup happens through an identity provider and sources are connected afterwards, on demand. The two events are separated by an arbitrary interval — seconds, days, or **forever**, because connecting is optional.
+
+Consumers must therefore treat them as unrelated:
+
+- **`UserRegisteredEvent` does not imply a data source exists.** Anything that reads sources, tokens, or workouts on registration will find nothing. There is no ordering or causality between the two events.
+- **`IntegrationConnectedEvent` is the sole trigger for ingestion backfill.** It is the first moment at which there is anything to fetch.
 
 ## What IAM consumes
 
-**Nothing from inside the system.** IAM's only inputs are external: the Strava OAuth callback (handled here, in `StravaOAuthService`) and the Strava deauthorization webhook (received by Activity Ingestion's `WebhookController` and routed back to `ConnectedSourceService.markRevoked` — see the "two channels" section of [domain-model.md](domain-model.md)). Neither is a domain event; both are external HTTP inputs.
+**Nothing from inside the system.** IAM's only inputs are external, and there are three of them — the Google OIDC callback and the Strava connect callback (both handled here) and the Strava deauthorization webhook (received by Activity Ingestion's `WebhookController` and routed back to `ConnectedSourceService.markRevoked`). See the "three channels" section of [domain-model.md](domain-model.md). None is a domain event; all three are external HTTP inputs.
 
 A BC consuming its own events is a smell (see conventions). IAM does not.
+
 
 ---
 
@@ -65,7 +77,7 @@ The JSON "externalized form" shown per event below is this wire shape — it inc
 
 ### `UserRegisteredEvent`
 
-A new internal identity was created. Emitted **only** on first-ever login for a given Strava athlete; a returning login does not emit it.
+A new internal identity was created. Emitted **only** on the first-ever login for a given identity-provider subject (`(GOOGLE, sub)`); a returning login does not emit it.
 
 ```java
 public record UserRegisteredEvent(
@@ -76,9 +88,12 @@ public record UserRegisteredEvent(
 
 **Consumers:** none in MVP. Reserved for a future analytics/onboarding consumer.
 
-**Payload rationale:** deliberately minimal. There is no current consumer, so the contract carries only identity and time. Fields a future consumer might want (e.g. `displayName` for a welcome flow) are **backward-compatible additions** (optional fields, same `v1`) when that consumer appears — not stuffed in speculatively now.
+**What it does *not* mean.** It does not mean the user has a data source, tokens, or any workouts — see "The two lifecycles are no longer simultaneous" above. A newly registered account is completely empty. A future onboarding consumer should treat this event as "start the welcome/nudge-to-connect track", never as "their history is ready".
+
+**Payload rationale:** deliberately minimal. There is no current consumer, so the contract carries only identity and time. Fields a future consumer might want (e.g. `displayName` for a welcome flow) are **backward-compatible additions** (optional fields, same `v1`) when that consumer appears — not stuffed in speculatively now. The identity provider is likewise absent: no consumer's behavior depends on *which* provider the user signed up with, and adding `provider` later is additive.
 
 **Dedup key (if a consumer needs one):** `userId` — a user is registered exactly once, so the user id itself distinguishes the fact.
+
 
 **Externalized form:**
 
@@ -101,7 +116,9 @@ public record UserRegisteredEvent(
 
 ### `IntegrationConnectedEvent`
 
-A `ConnectedSource` for the user is now `ACTIVE` and usable. Emitted when a source becomes `ACTIVE` — both on the **first** connect and on a **reconnect** after a prior revoke (a fresh `ConnectedSource` row replaces the `REVOKED` one, per the partial unique index in [database.md](database.md)).
+A `ConnectedSource` for the user is now `ACTIVE` and usable. Emitted on every transition to `ACTIVE`: the **first** connect, and each **reconnect** after a prior revoke. Re-running the connect flow against an already-`ACTIVE` source refreshes its tokens but is not a transition, so it emits nothing.
+
+Emitted from the **connect flow**, never from login. Under the previous model this event left the same transaction as `UserRegisteredEvent`; it no longer does.
 
 ```java
 public record IntegrationConnectedEvent(
@@ -112,11 +129,16 @@ public record IntegrationConnectedEvent(
 ) {}
 ```
 
-**Consumers:** Activity Ingestion — triggers the activity sync for this source.
+**Consumers:** Activity Ingestion — triggers the activity sync for this source. This is the **only** trigger for the initial backfill; nothing starts syncing at registration, because at registration there is nothing to sync.
 
 **First connect vs reconnect.** The event is the **same** in both cases by design; IAM does not encode the distinction. Activity Ingestion decides full backfill vs incremental catch-up from the presence/absence of a `SyncCursor` for `(userId, provider)` — that is Ingestion's concern, not part of this contract. (If Ingestion later needs the hint in the event itself, a `firstConnection` boolean is a backward-compatible addition.)
 
-**Payload rationale:** `userId` + `provider` are all Ingestion strictly needs — it obtains the access token via `TokenManager.getValidAccessToken(userId)` and never receives tokens in the event. `connectedSourceId` is carried because it is the **natural dedup key**: each source is activated once, and a reconnect produces a new source with a new id, so keying on it distinguishes connects correctly. `providerUserId` is intentionally **absent**: Strava infers the athlete from the access token, so Ingestion does not need it for the API call, and it is available from `ConnectedSourceEntity` if ever required.
+**Payload rationale:** `userId` + `provider` are all Ingestion strictly needs — it obtains the access token via `TokenManager.getValidAccessToken(userId)` and never receives tokens in the event. `providerUserId` is intentionally **absent**: Strava infers the athlete from the access token, so Ingestion does not need it for the API call, and it is available from `ConnectedSourceEntity` if ever required. `connectedSourceId` is carried for correlation and logging.
+
+> **`connectedSourceId` is not a per-occurrence dedup key.** Reconnecting the same Strava athlete **reactivates the existing row in place** rather than inserting a new one — forced by the non-partial `UNIQUE (provider, provider_user_id)` constraint (see the reconnect table in [database.md](database.md)). So the same `connectedSourceId` recurs across a revoke/reconnect cycle, and a consumer that stored it as a "seen" key would silently drop every reconnect — the exact case where restarting ingestion matters most.
+>
+> Consumers must instead be **idempotent on the intent**: "ensure a sync is scheduled for `(userId, provider)`", which is naturally idempotent and needs no dedup storage (pattern 1 in [idempotency-and-outbox.md](../../technical-notes/idempotency-and-outbox.md)). Where a consumer genuinely needs to distinguish occurrences, the key is `(connectedSourceId, occurredAt)`.
+
 
 **Externalized form:**
 
@@ -140,7 +162,7 @@ public record IntegrationConnectedEvent(
 
 ### `IntegrationRevokedEvent`
 
-The user's connection to the provider is no longer usable. Emitted on every `ACTIVE → REVOKED` transition (invariant 5 in the domain model). Not re-emitted if the source is already `REVOKED` — the state-transition guard in `ConnectedSourceService` ensures the event fires only on the actual transition.
+The user's connection to the provider is no longer usable. Emitted on every `ACTIVE → REVOKED` transition (invariant 6 in the domain model). Not re-emitted if the source is already `REVOKED` — the state-transition guard in `ConnectedSourceService` ensures the event fires only on the actual transition.
 
 ```java
 public record IntegrationRevokedEvent(
@@ -154,9 +176,10 @@ public record IntegrationRevokedEvent(
 
 **Consumers:**
 - **Activity Ingestion** — cancels pending `SyncJob`s for this user and stops issuing Strava calls. Naturally idempotent (cancelling already-cancelled jobs is a no-op), so it needs no dedup key.
-- **Notifications** — tells the user the connection broke and to reconnect. This sends a real side effect (email), so it dedups on `connectedSourceId` (each source is revoked once).
+- **Notifications** — tells the user the connection broke and to reconnect. This sends a real side effect (email), so it dedups on `(connectedSourceId, occurredAt)`. **Not `connectedSourceId` alone**: because reconnect reactivates the row in place, one source can be revoked, reconnected and revoked again, and a key of `connectedSourceId` alone would suppress every notification after the first.
 
 **Payload rationale:** `reason` is part of the contract because consumers act on it. Notifications can phrase the message differently for a user-initiated disconnect vs a silently rejected token; diagnostics and the `deauthorization-storm` runbook care about the distribution of reasons.
+
 
 **Externalized form:**
 
@@ -197,20 +220,22 @@ Detection point → reason:
 |---|---|---|---|
 | Strava deauth webhook | Ingestion `WebhookController` | `DEAUTHORIZED` | webhook channel → `ConnectedSourceService.markRevoked` |
 | 401 on a Strava data call | Ingestion (via `TokenManager`) | `TOKEN_REJECTED` | `TokenManager.markRevoked` → `ConnectedSourceService.markRevoked` |
-| In-app "disconnect" action | IAM API (future) | `USER_REQUESTED` | IAM endpoint → `ConnectedSourceService.markRevoked` |
+| In-app "disconnect" action | IAM API | `USER_REQUESTED` | `DELETE /api/me/sources/{provider}` → `ConnectedSourceService.markRevoked` |
 
-`USER_REQUESTED` is defined now but reserved for the in-app disconnect flow, which is **post-MVP**. The two reasons exercised in MVP are `DEAUTHORIZED` and `TOKEN_REJECTED` (the two triggers in [token-management.md](../../technical-notes/token-management.md)).
+All three reasons are exercised in MVP. `USER_REQUESTED` is now reachable because disconnecting a source no longer destroys the account's only way to log in — the user's sign-in method lives in `user_identities`, untouched by source management. Under the previous model the same action would have been indistinguishable from account deletion, which is why it had been deferred. See [api.md](api.md).
+
 
 ---
 
 ## Guarantees and emit conditions
 
-1. **`UserRegisteredEvent` fires exactly once per user**, at creation. A returning login resolves the existing user and emits nothing.
-2. **`IntegrationConnectedEvent` fires on every `ACTIVE` transition** — first connect and each reconnect after revoke.
+1. **`UserRegisteredEvent` fires exactly once per user**, at creation, from the login transaction. A returning login resolves the existing user and emits nothing.
+2. **`IntegrationConnectedEvent` fires on every transition to `ACTIVE`** — first connect and each reconnect after revoke — from the connect transaction, which is **not** the login transaction.
 3. **`IntegrationRevokedEvent` fires on every `ACTIVE → REVOKED` transition**, and only then. Re-revoking an already-revoked source is a no-op with no event.
 4. **Transactional publication.** All three are written to `event_publication` in the same transaction as the state change they describe (Modulith Outbox). No dual write.
-5. **At-least-once delivery; idempotent consumers.** Modulith re-delivers only incomplete publications, and its completion tracking is the primary guard. For the crash-after-side-effect window, consumers that produce external effects add their own idempotency: Ingestion via naturally idempotent state transitions (cancel jobs, mark status), Notifications via an Inbox keyed on the natural business key in the payload (`connectedSourceId` / `userId`). No synthetic event id is required for this in the MVP.
-6. **Per-user ordering only where it matters.** On a first login, `UserRegisteredEvent` and `IntegrationConnectedEvent` are emitted from the same `handleCallback` transaction. No consumer depends on the ordering *between* these two (different, independent consumers), so no cross-event ordering guarantee is required or offered.
+5. **At-least-once delivery; idempotent consumers.** Modulith re-delivers only incomplete publications, and its completion tracking is the primary guard. For the crash-after-side-effect window, consumers that produce external effects add their own idempotency: Ingestion via naturally idempotent state transitions (ensure a sync is scheduled, cancel jobs, mark status), Notifications via an Inbox keyed on the natural business key in the payload (`(connectedSourceId, occurredAt)` / `userId`). No synthetic event id is required for this in the MVP.
+6. **No ordering or causality between registration and connection.** `UserRegisteredEvent` and `IntegrationConnectedEvent` come from **different transactions at different times**, separated by however long the user takes to connect a source — possibly forever. No consumer may assume one implies or precedes the other in any useful window. (Their consumers are distinct and independent, so nothing needs such a guarantee.)
+
 
 ---
 
@@ -218,7 +243,8 @@ Detection point → reason:
 
 Per the "what is NOT a domain event" rule in conventions:
 
-- **Returning-user login.** No state change worth broadcasting — no `UserRegistered`, and no `IntegrationConnected` unless it is an actual reconnect.
+- **Returning-user login.** No state change worth broadcasting — no `UserRegistered`, and no `IntegrationConnected` (login does not touch `connected_sources` at all).
+- **Linking or unlinking a sign-in method.** `user_identities` changes are private to IAM: no other BC keys off *how* a user authenticates, only off `userId`, which never changes. Adding an Apple login to an existing account changes nothing downstream.
 - **Token refresh** and **successful token use.** Internal `TokenManager` mechanics; observed via metrics/traces, not events (see [token-management.md](../../technical-notes/token-management.md)).
 - **JWT issuance.** A synchronous result of the login request, returned to the caller — not a fact broadcast to other BCs.
 - **`ERROR`-state transitions** on a `ConnectedSource`. `ERROR` is a transient retry state; it does not stop Ingestion or notify the user, so it carries no event. Only the terminal `REVOKED` transition does.
@@ -227,7 +253,8 @@ Per the "what is NOT a domain event" rule in conventions:
 
 ## Next documents in this BC
 
-- [api.md](api.md) — REST endpoints (login initiation, OAuth callback, current user)
-- Sequence diagram: `diagrams/sequence/strava-oauth-login.md` — where `UserRegisteredEvent` / `IntegrationConnectedEvent` fire in the login flow
+- [api.md](api.md) — REST endpoints (Google login, Strava connect, current user, sources, identities)
+- Sequence diagrams: [google-login.md](diagrams/sequence/google-login.md) (where `UserRegisteredEvent` fires), [strava-connect.md](diagrams/sequence/strava-connect.md) (where `IntegrationConnectedEvent` fires), [revocation-flow.md](diagrams/sequence/revocation-flow.md)
 - [database.md](database.md) — already written
 - [domain-model.md](domain-model.md) — already written
+

@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.modulith.test.AssertablePublishedEvents;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
@@ -42,6 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -98,6 +100,9 @@ class StravaTokenManagerIT extends BaseIT {
 
     @MockitoBean
     private StravaOAuthClient stravaOAuthClient;
+
+    @MockitoSpyBean
+    private StravaTokenStateService stravaTokenStateServiceSpy;
 
     // =======================================================================
     //  getValidAccessToken — fast path
@@ -240,18 +245,36 @@ class StravaTokenManagerIT extends BaseIT {
         void revokeBetweenFastPathAndLockReReadIsDetected() {
             UUID userId = fixtures.seedActiveSource(clock.instant().minus(Duration.ofMinutes(5)));
 
-            // Simulate the deauth webhook winning the race: the source is flipped
-            // to REVOKED after the fast path read the ACTIVE state but before the
-            // lock's double-check re-reads it.
-            tx.executeWithoutResult(status -> {
-                ConnectedSourceEntity src = loadSource(userId);
-                src.setStatus(ConnectedSourceStatus.REVOKED);
-                connectedSourceRepository.saveAndFlush(src);
-            });
+            // Deterministic race reproduction:
+            //   - 1st readSnapshot (fast path)      → real method → returns ACTIVE + expired
+            //     → isStillValid == false → StravaTokenManager enters the per-user lock.
+            //   - 2nd readSnapshot (inside lock)    → BEFORE delegating to the real method,
+            //     a separate transaction flips the source to REVOKED (this is what a deauth
+            //     webhook would do concurrently). The real method then observes REVOKED and
+            //     throws IntegrationNotActiveException.
+            //
+            // The contract under test: the inside-lock double-check MUST detect the mid-flight
+            // revoke so we never call stravaOAuthClient.refreshAccessToken() with a dead
+            // refresh token.
+            AtomicInteger readSnapshotCalls = new AtomicInteger();
+            doAnswer(invocation -> {
+                if (readSnapshotCalls.incrementAndGet() == 2) {
+                    tx.executeWithoutResult(status -> {
+                        ConnectedSourceEntity src = loadSource(userId);
+                        src.setStatus(ConnectedSourceStatus.REVOKED);
+                        connectedSourceRepository.saveAndFlush(src);
+                    });
+                }
+                return invocation.callRealMethod();
+            }).when(stravaTokenStateServiceSpy).readSnapshot(userId);
 
             assertThatThrownBy(() -> stravaTokenManager.getValidAccessToken(userId))
                     .as("double-check readSnapshot inside the lock must reject a mid-flight revoke")
                     .isInstanceOf(IntegrationNotActiveException.class);
+
+            assertThat(readSnapshotCalls.get())
+                    .as("both the fast-path and the inside-lock readSnapshot must have been invoked")
+                    .isEqualTo(2);
             verify(stravaOAuthClient, never()).refreshAccessToken(any());
         }
 

@@ -26,7 +26,8 @@ credentials and secrets, keep domain data queryable
 
 | Surface | Exposure | Primary defense |
 |---|---|---|
-| Strava OAuth callback (`/login/oauth2/code/strava`) | public | Spring Security framework, `state` CSRF guard |
+| Google OIDC login callback (`/login/oauth2/code/google`) | public | Spring Security framework, `state` CSRF guard |
+| Strava connect callback (`/connect/oauth2/code/strava`) | public, JWT-gated | Spring Security `oauth2Client`, `state` guard; connect chain requires an authenticated caller |
 | Webhook receiver (`POST /api/webhooks/strava`) | public | `subscription_id` filter + authenticated re-fetch as the real trust boundary |
 | Webhook validation (`GET …`) | public | `hub.verify_token` match |
 | Authenticated API (`/api/**`) | public, JWT-gated | RS256 JWT validation per resource-server BC |
@@ -88,8 +89,16 @@ into an image; all are injected at deploy time.
 ## GDPR / data lifecycle (MVP posture)
 
 - **User deletion** is transactional — because tokens and user data live in the same Postgres,
-  deleting a user cascades through their `ConnectedSource` (tokens), and the relevant per-BC data by
-  `user_id`. (A full GDPR export/erase endpoint is post-MVP, noted in several BC APIs.)
+  deleting a user cascades through their `UserIdentity` rows (sign-in methods) and `ConnectedSource`
+  (data-source tokens), and the relevant per-BC data by `user_id`. (A full GDPR export/erase endpoint
+  is post-MVP, noted in several BC APIs.)
+- **Personal data is not duplicated across BCs.** The contact address lives in exactly one column
+  (`users.email`) and is read by Notifications through the `UserContactReader` published port at
+  delivery time. It is deliberately kept off event payloads: Spring Modulith serializes payloads
+  into `event_publication`, so an address on an event would be copied durably into the outbox of
+  every producing module and erasure would have to reach into JSON blobs. Same reasoning bars a
+  Notifications-side projection of it
+  ([IAM domain-model](../contexts/identity-access/domain-model.md)).
 - **Token revocation on disconnect** — disconnecting a source revokes at Strava and marks `REVOKED`;
   retained vs cleared tokens per policy ([token-management.md](../technical-notes/token-management.md)).
 - **Raw payload retention** — `RawActivityPayload` is kept as replay source of truth; a retention
@@ -118,8 +127,9 @@ hardening path (envelope encryption, KMS) documented.
 - **No envelope encryption yet** — env-key MVP; KMS is the documented production step.
 - **No WAF / rate-limiting on our own API** beyond the Strava-budget governance — a public-launch
   concern, not invite-only MVP.
-- **No MFA / enterprise SSO** — single Strava-OAuth login; enterprise identity would warrant Keycloak
-  ([ADR 0009](../adr/0009-identity-spring-security.md)).
+- **No MFA / enterprise SSO** — single Google OIDC login (one identity provider; Strava is a
+  connected data source, not a login, per [ADR 0011](../adr/0011-identity-provider-signup.md));
+  enterprise identity would warrant Keycloak ([ADR 0009](../adr/0009-identity-spring-security.md)).
 - **No full GDPR self-service** (export/erase endpoints) — transactional deletion exists; self-service
   tooling is post-MVP.
 

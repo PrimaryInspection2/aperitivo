@@ -11,5 +11,6 @@ import java.util.UUID;
 @Repository
 public interface ConnectedSourceRepository extends JpaRepository<ConnectedSourceEntity, UUID> {
 
+    Optional<ConnectedSourceEntity> findByProviderAndProviderUserId(DataProvider provider, String providerUserId);
     Optional<ConnectedSourceEntity> findByUserIdAndProvider(UUID userId, DataProvider provider);
 }

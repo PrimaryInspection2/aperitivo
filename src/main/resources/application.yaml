@@ -2,6 +2,13 @@ spring:
   application:
     name: aperitivo
 
+  # Local secrets live in .env (git-ignored, shared with Docker Compose).
+  # The [.properties] hint is required: Boot does not recognise ".env" as a
+  # loadable extension on its own. "optional:" keeps deployments working where
+  # the values arrive as real environment variables instead.
+  config:
+    import: "optional:file:./.env[.properties]"
+
   datasource:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:aperitivo}
     username: ${POSTGRES_USER:aperitivo}
@@ -53,18 +60,58 @@ spring:
             connect-timeout: ${STRAVA_OAUTH_CONNECT_TIMEOUT_MS:3000}
             read-timeout: ${STRAVA_OAUTH_READ_TIMEOUT_MS:8000}
 
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+            scope:
+              - openid
+              - profile
+              - email
+          strava:
+            client-id: ${STRAVA_CLIENT_ID}
+            client-secret: ${STRAVA_CLIENT_SECRET}
+            authorization-grant-type: authorization_code
+            client-authentication-method: client_secret_post
+            client-name: Strava
+            redirect-uri: "{baseUrl}/connect/oauth2/code/{registrationId}"
+            scope:
+              - read
+              - activity:read_all
+              - profile:read_all
+        provider:
+          google:
+            issuer-uri: https://accounts.google.com
+          strava:
+            authorization-uri: https://www.strava.com/oauth/authorize
+            token-uri: https://www.strava.com/oauth/token
+
+# No OTel collector runs locally, so the exporters would retry-and-log forever.
+# Opt-in per environment; production flips these on (docs/operations/observability.md).
+# Prometheus is unaffected — it scrapes /actuator/prometheus rather than being pushed to.
+management:
+  otlp:
+    metrics:
+      export:
+        enabled: ${OTLP_METRICS_ENABLED:false}
+    tracing:
+      export:
+        enabled: ${OTLP_TRACING_ENABLED:false}
+    logging:
+      export:
+        enabled: ${OTLP_LOGS_ENABLED:false}
+
 aperitivo:
   provider:
     strava:
-      client-id: ${STRAVA_CLIENT_ID:dev-client-id}
-      client-secret: ${STRAVA_CLIENT_SECRET:dev-client-secret}
-      redirect-uri: ${STRAVA_REDIRECT_URI:http://localhost:8080/strava/oauth/callback}
       api:
         url: https://www.strava.com/api/v3
-      oauth:
-        url: https://www.strava.com/oauth/token
-
   identity:
+    login:
+      registration-id: ${IAM_LOGIN_REGISTRATION_ID:google}
     encryption:
       key: ${AES_GCM_SECRET}
     token-refresh:
@@ -81,3 +128,8 @@ aperitivo:
       max-pool-size: ${IAM_AUDIT_MAX_POOL_SIZE:4}
       queue-capacity: ${IAM_AUDIT_QUEUE_CAPACITY:500}
       thread-name-prefix: iam-audit-
+
+logging:
+  level:
+    org.springframework.security: TRACE
+    org.springframework.web: TRACE

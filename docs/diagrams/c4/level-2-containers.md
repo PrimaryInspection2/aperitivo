@@ -21,7 +21,8 @@ build-time/logical boundary, not separate containers —
 ```mermaid
 flowchart TB
     Athlete["👤 Athlete"]
-    Strava["🏃 Strava (external)"]
+    Google["🔑 Google (external IdP)"]
+    Strava["🏃 Strava (external data source)"]
 
     subgraph Host["Single VPS / Docker Compose"]
         NGINX["<b>nginx</b><br/><i>reverse proxy</i><br/>TLS termination, SSE buffering off"]
@@ -43,6 +44,7 @@ flowchart TB
     Athlete -->|HTTPS| NGINX
     Strava -->|webhooks HTTPS| NGINX
     NGINX --> APP
+    APP -->|"OIDC login"| Google
     APP -->|OAuth/REST| Strava
     APP -->|JDBC| PG
     APP -->|RESP| REDIS
@@ -79,7 +81,9 @@ flowchart TB
   Redis precisely so they're correct across instances — which is why horizontal scaling is gated only
   by the in-memory SSE registry, not these ([deployment.md](../../operations/deployment.md)).
 - **No identity-server container.** Identity is in-app (Spring Security + own JWT) — no Keycloak
-  ([ADR 0009](../../adr/0009-identity-spring-security.md)).
+  ([ADR 0009](../../adr/0009-identity-spring-security.md)). The external identity provider is Google
+  (OIDC), reached over HTTPS for login — not a container we run
+  ([ADR 0011](../../adr/0011-identity-provider-signup.md)).
 
 ## Not shown here (deferred)
 

@@ -29,6 +29,7 @@ sequenceDiagram
     participant DEL as DeliveryService
     participant SSE as SseRegistry<br/>(Map of UserId to List of SseEmitter)
     participant SMTP as EmailChannelAdapter
+    participant UCR as UserContactReader<br/>(IAM published port)
     participant EP as event_publication<br/>(Notifications outbox)
 
     ANA-->>ND: @ApplicationModuleListener PersonalRecordSetEvent<br/>{userId, sportType, recordType, value, previousValue, providerActivityId}
@@ -49,7 +50,16 @@ sequenceDiagram
     Note over ND,PREF: GATE + RENDER per channel
     ND->>PREF: effectivePreferences(userId, PERSONAL_RECORD)
     PREF-->>ND: {EMAIL: enabled(default on), IN_APP: enabled(default on)}
-    loop per enabled channel
+    opt EMAIL enabled
+        ND->>UCR: emailFor(userId)
+        alt address present
+            UCR-->>ND: address found
+        else no contact address
+            UCR-->>ND: Optional.empty
+            Note over ND: EMAIL unavailable for this account —<br/>skip the channel, do NOT enqueue a doomed attempt.<br/>IN_APP still proceeds.
+        end
+    end
+    loop per deliverable channel
         ND->>ND: render template(PERSONAL_RECORD, channel, params)
         ND->>DB: INSERT delivery_attempt(notification_id, channel, status=QUEUED)
     end
@@ -69,7 +79,10 @@ sequenceDiagram
             DEL->>EP: publish NotificationDeliveredEvent{channel=IN_APP}
         end
     and EMAIL channel
-        DEL->>SMTP: send(rendered subject + body)
+        DEL->>UCR: emailFor(userId)
+        Note over DEL,UCR: resolved at SEND time, not at enqueue time —<br/>a retried message goes to the user's current address<br/>and no copy is stored in the notifications schema
+        UCR-->>DEL: recipient address
+        DEL->>SMTP: send(recipient, rendered subject + body)
         alt SMTP accepted
             SMTP-->>DEL: 250 OK
             DEL->>DB: attempt status=SENT

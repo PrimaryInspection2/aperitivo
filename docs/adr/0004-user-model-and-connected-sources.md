@@ -3,6 +3,10 @@
 - **Status:** Accepted
 - **Date:** 2026-05-20
 - **Reviewed:** 2026-06-14 (Keycloak references removed; alternatives strengthened; decision unchanged)
+- **Amended by:** [ADR 0011](0011-identity-provider-signup.md) — the separation decided here is retained and made structural: sign-in methods moved out of `ConnectedSource` into a dedicated `UserIdentity` (`user_identities`), and a `User` may now exist with **zero** connected sources.
+
+> **Note (ADR 0011).** This ADR's core decision — an internal `user_id` UUID, with provider linkage in a separate entity — is unchanged and was vindicated. What changed is that the "additional identity providers" extension point anticipated below is now **exercised**: identity comes from an OIDC provider (Google) recorded in `user_identities`, while `ConnectedSource` narrows to its data-access role only. Read the paragraphs below about *identity providers* as describing `UserIdentity`; `ConnectedSource` statements still hold for data sources.
+
 
 ## Context
 

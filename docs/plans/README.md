@@ -15,11 +15,20 @@
 
 Плани — living documents. Після завершення BC файл лишається як історичний запис "як воно робилося".
 
+### Focused sub-plans
+
+Коли ADR перекроює вже спланований BC, доводити редизайн до кінця всередині основного плану
+незручно — кроки розповзаються по секціях, а порядок залежностей губиться. Для такого випадку
+заводиться **під-план** `<bc-name>-<adr>.md`: вузька область, кроки в порядку залежностей і
+блок «читати перед кроком» на **кожному** кроці замість спільної Phase A. Під-план завжди
+посилається на батьківський план, а батьківський — на нього.
+
 ## Available plans
 
 | BC | Plan | Status |
 |---|---|---|
 | Identity & Access | [identity.md](identity.md) | In progress |
+| Identity & Access | [identity-adr-0011.md](identity-adr-0011.md) — sub-plan: завершення міграції на [ADR 0011](../adr/0011-identity-provider-signup.md) | In progress |
 | Activity Ingestion | *(not yet)* | Not started |
 | Workout Catalog | *(not yet)* | Not started |
 | Performance Analytics | *(not yet)* | Not started |

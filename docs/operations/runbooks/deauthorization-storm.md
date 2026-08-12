@@ -23,8 +23,10 @@ change, a publicized incident, or a bug on our side that prompts mass disconnect
 ## Mitigate
 
 - **Genuine mass deauth (webhooks):** the system handles each correctly — REVOKED, cancel sync jobs,
-  notify user to reconnect. The storm is load, not error; ensure Notifications isn't overwhelmed (it
-  dedups and retries). Nothing to "fix" — users chose to disconnect.
+  notify user to reconnect (the Strava **connect** flow, not a re-login — Strava is a data source, not
+  a login provider, [ADR 0011](../../adr/0011-identity-provider-signup.md)). The storm is load, not
+  error; ensure Notifications isn't overwhelmed (it dedups and retries). Nothing to "fix" — users
+  chose to disconnect.
 - **False storm (our credentials broke):** **do not** let the 401-handler mass-revoke valid connections.
   If our app's Strava credentials are the cause, fixing them restores all calls — the tokens were never
   actually invalid. This is why distinguishing webhook-deauth from 401-deauth in step 1 is critical.

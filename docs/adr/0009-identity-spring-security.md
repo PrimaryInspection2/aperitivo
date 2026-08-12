@@ -3,6 +3,10 @@
 - **Status:** Accepted
 - **Date:** 2026-06-14
 - **Supersedes:** [ADR 0002](0002-identity-model-superseded.md)
+- **Amended by:** [ADR 0011](0011-identity-provider-signup.md) — the mechanism decided here (Spring Security OAuth2 client + our own RS256 JWT issuer, no external identity server) is unchanged; the **provider** changed from Strava to Google (OIDC).
+
+> **Note (ADR 0011).** Everything below about *how* identity works still holds: Spring Security does the OAuth flow, we mint our own JWT, there is no Keycloak. What changed is *who authenticates the user*. This ADR assumed Strava login; [ADR 0011](0011-identity-provider-signup.md) moves sign-in to an OIDC identity provider (Google) and reduces Strava to a data source connected on demand. The reasoning below about Strava being "OAuth 2.0, not OIDC" is exactly why — read it as an argument that survived and was followed to its conclusion.
+
 
 ## Context
 

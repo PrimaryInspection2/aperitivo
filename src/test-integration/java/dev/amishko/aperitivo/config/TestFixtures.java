@@ -67,7 +67,6 @@ public class TestFixtures {
                     .refreshToken(spec.refreshToken)
                     .accessTokenExpiresAt(spec.accessTokenExpiresAt)
                     .refreshTokenExpiresAt(spec.refreshTokenExpiresAt)
-                    // ArrayList so services that clear-in-place (markRevoked) don't fail.
                     .scopes(new ArrayList<>(spec.scopes == null
                             ? List.of("read")
                             : spec.scopes))

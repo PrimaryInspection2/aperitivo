@@ -26,17 +26,28 @@ DDD principle: when the same word means different things in different Bounded Co
 
 **User** — the internal identity record. Has a UUID `user_id` that is the stable handle throughout the system. Decoupled from any external system's user ID.
 
-**ConnectedSource** — a credentialed link from a User to an external data provider (currently Strava). Each ConnectedSource has its own lifecycle (`ACTIVE`, `REVOKED`, `ERROR`) and holds the OAuth tokens for that provider. A User has 0 or more ConnectedSources (MVP: exactly 1, Strava).
+**UserIdentity** — a way a User can sign in: the pair `(identity provider, sub)` released by an OIDC provider. Holds **no tokens**, **no email**, and **no status lifecycle** — a sign-in method is present or absent, and everything about the *person* (contact address, display name, avatar) lives on `User`. A User has 1 or more UserIdentities and can never have zero (removing the last one would leave the account unreachable). MVP: exactly 1, Google. See [ADR 0011](../adr/0011-identity-provider-signup.md).
 
-**Provider** — an external system Aperitivo integrates with as an OAuth-based, webhook-style data source. MVP: `STRAVA`. Realistic future candidates with similar token semantics: `GARMIN`, `WAHOO`, `COROS`, `SUUNTO`, `POLAR`, `TRAININGPEAKS`. (Mobile-native sources like Apple Health / Google Fit and file uploads like FIT/GPX/TCX have different semantics and are not modeled as Providers.)
+**ConnectedSource** — a credentialed link from a User to an external data provider (currently Strava). Each ConnectedSource has its own lifecycle (`ACTIVE`, `REVOKED`, `ERROR`) and holds the OAuth tokens for that provider. A User has **0 or more** ConnectedSources — zero is the normal state of a freshly signed-up account, and the permanent state of a user who never connects anything.
 
-**Identity Provider (IdP)** — the system that authenticates the User. MVP: Strava (via OAuth2 login). Future: Google, Apple, email/password. Identity is issued by Aperitivo itself (Spring Security), not by an external identity server.
+**Identity Provider (IdP)** — an external system that **authenticates** the User and tells us who they are. MVP: `GOOGLE` (OIDC). Future: Apple, Facebook. Produces a `UserIdentity`. Identity *tokens* are issued by Aperitivo itself (Spring Security), not by an external identity server — the IdP establishes who the user is; we mint the JWT.
 
-**TokenManager** — the single component in the IAM BC with permission to read, refresh, and invalidate Strava (and future provider) tokens. No other code in the system touches encrypted token storage directly.
+**Provider** — an external system Aperitivo integrates with as an OAuth-based, webhook-style **data source**. MVP: `STRAVA`. Realistic future candidates with similar token semantics: `GARMIN`, `WAHOO`, `COROS`, `SUUNTO`, `POLAR`, `TRAININGPEAKS`. Produces a `ConnectedSource`. (Mobile-native sources like Apple Health / Google Fit and file uploads like FIT/GPX/TCX have different semantics and are not modeled as Providers.)
 
-**Revocation** — a state in which a ConnectedSource is no longer usable. Triggered by the Strava API returning 401, or by Strava's deauthorization webhook. Causes the `IntegrationRevoked` event.
+> **Identity Provider and Provider are different things and are never mixed.** An IdP answers *"who is this?"*; a Provider answers *"where does their training data come from?"*. Strava is a Provider and **not** an IdP — it is plain OAuth 2.0 with no ID token and no email in the default scope, so it cannot establish an account identity. They are modeled as two enums (`IdentityProvider`, `Provider`) and two tables (`user_identities`, `connected_sources`) precisely so the compiler and the schema keep them apart. See [ADR 0011](../adr/0011-identity-provider-signup.md).
 
-**JWT** — the identity token Aperitivo issues for an authenticated user (Spring Security `JwtEncoder`, RS256). Claims are minimal: `sub` = `user_id`, `iss`, `iat`, `exp`, `jti`. Does not contain Strava tokens.
+**Login flow** — the browser OAuth flow that **signs a user in**, run against an Identity Provider by an *anonymous* caller (Spring Security `oauth2Login`). Creates the `User` and `UserIdentity`. Never touches `connected_sources`.
+
+**Connect flow** — the browser OAuth flow that **attaches a data source**, run against a Provider by an *already-authenticated* caller (Spring Security `oauth2Client`). Creates or reactivates a `ConnectedSource`. Never signs anyone in and never changes who is logged in — the `user_id` comes from our own JWT.
+
+**TokenManager** — the single component in the IAM BC with permission to read, refresh, and invalidate Strava (and future provider) tokens. No other code in the system touches encrypted token storage directly. Identity Providers contribute no tokens, so nothing in `user_identities` passes through it.
+
+**UserContactReader** — IAM's published port for the account's contact address (`users.email`), read by the Notifications BC only, at the moment of email delivery. Narrow and read-only (`Optional<String> emailFor(UUID userId)`); returns empty for an account that has no address, which is a supported state rather than an error. The address is never carried on event payloads and never copied into another BC's schema.
+
+**Revocation** — a state in which a ConnectedSource is no longer usable. Triggered by the Strava API returning 401, by Strava's deauthorization webhook, or by the user disconnecting the source in-app. Causes the `IntegrationRevoked` event. Revoking a source never affects the user's ability to log in.
+
+**JWT** — the identity token Aperitivo issues for an authenticated user (Spring Security `JwtEncoder`, RS256). Claims are minimal: `sub` = `user_id`, `iss`, `iat`, `exp`, `jti`. Contains no provider identifiers and no Strava tokens. Note that `sub` is overloaded in the wider OAuth world: **our** JWT's `sub` is the internal `user_id`; a **provider's** `sub` is stored as `provider_user_id`. They are never the same value.
+
 
 ---
 

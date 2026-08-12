@@ -27,10 +27,18 @@ references are tabulated separately below.
 ```mermaid
 erDiagram
     users ||--o{ connected_sources : "has (FK)"
+    users ||--o{ user_identities : "has (FK)"
     users {
         uuid id PK
         text display_name
         text email
+        timestamptz created_at
+    }
+    user_identities {
+        uuid id PK
+        uuid user_id FK
+        text provider "issuer — e.g. GOOGLE"
+        text provider_user_id "sub"
         timestamptz created_at
     }
     connected_sources {
@@ -46,7 +54,13 @@ erDiagram
     }
 ```
 
-The **one** intra-BC FK here: `connected_sources.user_id → users.id` (both IAM-owned).
+Two intra-BC FKs here, both IAM-owned: `connected_sources.user_id → users.id` and
+`user_identities.user_id → users.id`. `user_identities` holds **sign-in methods** (keyed on
+`(provider, provider_user_id)` = `(issuer, sub)`) and is deliberately a separate table from
+`connected_sources`: it stores **no tokens** and has **no status lifecycle** — an identity exists or
+it does not. `connected_sources` holds **data sources** only (Strava today). Login writes
+`user_identities`; the connect flow writes `connected_sources`
+([ADR 0011](../../adr/0011-identity-provider-signup.md)).
 
 ## Activity Ingestion
 

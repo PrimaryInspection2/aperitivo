@@ -65,6 +65,10 @@ public class AesGcmCipher {
     }
 
     private SecretKey generateSecretKey(String secretKeyBase64) {
+        if (secretKeyBase64 == null || secretKeyBase64.isBlank() || secretKeyBase64.startsWith("${")) {
+            throw new IllegalStateException(
+                    "aperitivo.identity.encryption.key is not set — AES_GCM_SECRET is missing from .env");
+        }
         byte[] keyBytes;
         try {
             keyBytes = Base64.getDecoder().decode(secretKeyBase64);

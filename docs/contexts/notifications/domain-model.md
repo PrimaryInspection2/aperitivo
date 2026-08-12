@@ -193,9 +193,9 @@ the preference matrix the user sees.
 
 | Service | Responsibility |
 |---|---|
-| `NotificationDispatchService` | the inbound event handlers (`@ApplicationModuleListener`): dedup, resolve user, gate on preferences, render, enqueue `DeliveryAttempt`s |
+| `NotificationDispatchService` | the inbound event handlers (`@ApplicationModuleListener`): dedup, resolve user, gate on preferences (incl. "has a contact address?" for EMAIL), render, enqueue `DeliveryAttempt`s |
 | `DeliveryService` | drives `DeliveryAttempt`s through channel adapters; backoff retries; emits `NotificationDelivered`/`NotificationFailed` |
-| `EmailChannelAdapter` | SMTP delivery |
+| `EmailChannelAdapter` | SMTP delivery; resolves the recipient at send time via IAM's `UserContactReader` port |
 | `SseChannelAdapter` | pushes to the in-memory emitter registry; the IN_APP delivery path |
 | `SseRegistry` | holds `Map<UserId, List<SseEmitter>>`; register/evict/send (see sse-streaming.md) |
 | `NotificationQueryService` | read side — the in-app inbox (unread items), delivery history, preferences |
@@ -203,6 +203,39 @@ the preference matrix the user sees.
 
 `NotificationDispatchService` is where the consume-heavy nature lives — one listener per inbound
 event type, all funneling into a common dedup→gate→render→enqueue pipeline.
+
+### Where the recipient address comes from
+
+Notifications knows a `userId` — every inbound event carries one — but an SMTP envelope needs an
+address, and Notifications owns no user table. The address is read from IAM through the
+**`UserContactReader` published port**, the same synchronous-read mechanism Ingestion uses for
+`TokenManager`:
+
+```java
+Optional<String> emailFor(UUID userId);
+```
+
+Two call sites, two different questions:
+
+| Caller | Question | On empty `Optional` |
+|---|---|---|
+| `NotificationDispatchService` | does this account have an address at all? | EMAIL is treated as unavailable — no `DeliveryAttempt` is enqueued for it |
+| `EmailChannelAdapter` | what address, right now? | terminal failure for that attempt |
+
+The address is **never copied into the Notifications schema** — not onto `NotificationEntity`, not
+onto `DeliveryAttemptEntity`. Delivery is deferred and retried, so resolving late is also what keeps
+a retried message going to the user's current address rather than the one they had when the event
+fired. Two cheap primary-key reads beat a stale local copy, and account erasure stays a
+single-row concern in IAM.
+
+`users.email` is **nullable** (a future identity provider may not supply one — see
+[ADR 0011](../../adr/0011-identity-provider-signup.md)), which is exactly why the dispatch-time
+check exists. Without it an addressless account would get a `QUEUED` EMAIL attempt that cannot
+succeed, and invariant 4 would faithfully emit `NotificationFailed` for something that is not a
+failure. No address is a **normal state**: the user simply gets the in-app channel.
+
+The full rationale for the port — including why the address is not carried on event payloads — is in
+[IAM's domain-model](../identity-access/domain-model.md).
 
 ## Default subscriptions
 
@@ -247,7 +280,12 @@ contrast — the association playground is Catalog/Planning, not here.
    first; SSE is a live-delivery optimization on top, and the inbox is the durable fallback.
 4. **Terminal failure is observable.** A `DeliveryAttempt` that exhausts retries emits
    `NotificationFailed`; delivery problems are never silent.
-5. **No cross-BC association.** `userId` is an id-ref; Notifications never joins IAM's tables.
+5. **No cross-BC association.** `userId` is an id-ref; Notifications never joins IAM's tables. The
+   one piece of IAM data it needs — the contact address — arrives through the `UserContactReader`
+   published port, and is never persisted on this side.
+6. **The recipient address is never stored here.** It is resolved per delivery attempt and
+   discarded. A user with no address is a normal case, handled by skipping the EMAIL channel, not
+   by failing it.
 
 ## Collaboration summary
 
@@ -255,8 +293,9 @@ contrast — the association playground is Catalog/Planning, not here.
 PersonalRecordSet / IntegrationRevoked / IngestionFailed /
 ScheduledSessionDue / SessionCompleted / SessionMissed
     → NotificationDispatchService (@ApplicationModuleListener, dedup on natural key)
-    → PreferenceService (gate) → render template → DeliveryAttempt per channel
-    → DeliveryService → EmailChannelAdapter (SMTP) / SseChannelAdapter (SseRegistry)
+    → PreferenceService (gate) + UserContactReader.emailFor (EMAIL only: address present?)
+    → render template → DeliveryAttempt per channel
+    → DeliveryService → EmailChannelAdapter (UserContactReader.emailFor → SMTP) / SseChannelAdapter (SseRegistry)
     → publishes NotificationDelivered / NotificationFailed
 NotificationQueryService → inbox (unread), delivery history
 ```

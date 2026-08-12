@@ -22,17 +22,18 @@ Goal: project skeleton, infrastructure, walking skeleton.
 
 ## Phase 1 — Identity & Access
 
-Goal: full Strava sign-in flow.
+Goal: Google sign-in (login) plus the Strava connect flow (data source).
 
-- `User` and `ConnectedSource` schemas, repositories, encryption-at-rest converter
-- Strava OAuth client via Spring Security (authorize, callback, code exchange, refresh)
+- `User`, `UserIdentity`, and `ConnectedSource` schemas, repositories, encryption-at-rest converter
+- Google OIDC login via Spring Security (`oauth2Login`, `OidcUserService`) — the only login provider
+- Strava connect/link flow via Spring Security (`oauth2Client`; authorize, callback, code exchange, refresh) — does not touch the `SecurityContext`
 - Self-issued JWT (Spring Security `JwtEncoder`, RS256); resource-server validation
 - `TokenManager` component with concurrency-safe refresh
-- IAM REST endpoints: initiate Strava login, callback, current user info
+- IAM REST endpoints: initiate Google login, callback, current user info; connect/disconnect data sources (`GET /connect/{provider}`, `GET /api/me/sources`, `DELETE /api/me/sources/{provider}`)
 - Deauthorization webhook handler
-- `UserRegistered`, `IntegrationConnected`, `IntegrationRevoked` events published in-process
+- `UserRegistered` (login flow), `IntegrationConnected` (connect flow), `IntegrationRevoked` events published in-process
 
-**Exit:** A user can sign in via Strava, receives a valid Aperitivo JWT, and has a `ConnectedSource` row with encrypted tokens. Logging out and revoking on the Strava side correctly mark the source as `REVOKED`.
+**Exit:** A user can sign in via Google and receive a valid Aperitivo JWT; then, from inside the app, connect Strava — producing a `ConnectedSource` row with encrypted tokens. Login never touches `connected_sources`. Revoking on the Strava side correctly marks the source as `REVOKED`. See [ADR 0011](../adr/0011-identity-provider-signup.md).
 
 ---
 
@@ -42,7 +43,7 @@ Goal: reliable post-activity ingestion.
 
 - Webhook receiver with verification
 - `SyncJob` queue with retry/backoff
-- Initial backfill on first sign-up (paginated, rate-limit-aware)
+- Initial backfill on source connect — triggered by `IntegrationConnected`, not sign-up (paginated, rate-limit-aware) ([ADR 0011](../adr/0011-identity-provider-signup.md))
 - Periodic reconciliation scheduler
 - `RawActivityPayload` retention
 - `ActivityIngested` event published
@@ -129,7 +130,7 @@ Goal: production-grade telemetry.
 
 ## Post-MVP candidates (not committed)
 
-- Additional identity providers (Google, Apple, email)
+- Additional identity providers (Apple, email) — Google ships in the MVP ([ADR 0011](../adr/0011-identity-provider-signup.md))
 - Additional data sources (Garmin Connect, Wahoo, COROS, Suunto, Polar, TrainingPeaks)
 - Coach use case (one user views multiple athletes)
 - Production hardening: envelope encryption (Vault Transit / KMS), Redis access-token cache

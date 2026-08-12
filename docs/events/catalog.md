@@ -22,11 +22,19 @@ See [conventions.md](conventions.md) for the full set. In brief:
 
 | Logical name | Java type | Version | Triggered by | Consumed by |
 |---|---|---|---|---|
-| `user-registered` | `UserRegisteredEvent` | v1 | First Strava sign-up | (future: analytics) |
-| `integration-connected` | `IntegrationConnectedEvent` | v1 | New ConnectedSource becomes ACTIVE | Activity Ingestion (kicks off backfill) |
+| `user-registered` | `UserRegisteredEvent` | v1 | New `UserEntity` created by the Google login flow (does **not** imply a data source) | (future: analytics) |
+| `integration-connected` | `IntegrationConnectedEvent` | v1 | A `ConnectedSource` becomes ACTIVE via the connect/link flow | Activity Ingestion (sole trigger for backfill) |
 | `integration-revoked` | `IntegrationRevokedEvent` | v1 | Token rejected by Strava, or deauth webhook | Activity Ingestion (cancel jobs), Notifications |
 
 Full contracts: [identity-access/events.md](../contexts/identity-access/events.md).
+
+> Since [ADR 0011](../adr/0011-identity-provider-signup.md), `user-registered` and
+> `integration-connected` are published by **different flows at different times**:
+> `UserRegisteredEvent` from the Google login flow when a new `UserEntity` is created,
+> `IntegrationConnectedEvent` from the Strava connect/link flow when a `ConnectedSource` becomes
+> ACTIVE. A newly registered user has no data source until they connect one, so
+> `integration-connected` — not sign-up — is the sole trigger for ingestion backfill. The
+> authoritative contract is [identity-access/events.md](../contexts/identity-access/events.md).
 
 ### Published by Activity Ingestion
 

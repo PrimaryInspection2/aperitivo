@@ -19,6 +19,8 @@ The goal is that a class name tells you which architectural layer it belongs to 
 
 - **Role-signaling services may keep a domain-meaningful suffix** instead of `…Service` when the name communicates a specific responsibility. The canonical case is **`TokenManager`** — the single owner of token access. `Manager` here signals "sole gatekeeper of this resource," which is more informative than `TokenService`. Use this sparingly and only when the role name genuinely adds meaning.
 
+- **Cross-BC published ports use `…Reader` when they are read-only.** A narrow interface in a module's base package, exposed to exactly one consumer, whose whole contract is "give me this one thing": `RawPayloadReader` (Ingestion → Catalog/Analytics), `UserContactReader` (IAM → Notifications). The suffix is a promise — a `…Reader` never mutates state, so a port that also writes must not use it. See [spring-modulith-boundaries.md](../technical-notes/spring-modulith-boundaries.md).
+
 - **Enums and value objects take no suffix.** They are domain types, not layered artifacts.
   - Enums: `Provider`, `SourceStatus`, `SportType`, `Channel`.
   - Value objects / immutable data holders: `StravaTokens`, `StravaProfile`, `StravaOAuthResult`, `PlannedTarget`.

@@ -4,7 +4,7 @@ How Aperitivo stores, reads, refreshes, and revokes Strava OAuth tokens. Complem
 
 ## Where tokens live
 
-Strava access and refresh tokens live in the `connected_sources` table (Identity & Access BC), in `access_token_encrypted` and `refresh_token_encrypted` columns (`bytea`), encrypted with **AES-GCM** at the application layer. Plaintext tokens exist only transiently in memory during a Strava API call.
+Strava access and refresh tokens live in the `connected_sources` table (Identity & Access BC), in `access_token_encrypted` and `refresh_token_encrypted` columns (`bytea`), encrypted with **AES-GCM** at the application layer. Plaintext tokens exist only transiently in memory during a Strava API call. They are written there by the **Strava connect flow** — an already-authenticated user linking a data source — **not** by login: login is Google and never touches `connected_sources` ([ADR 0011](../adr/0011-identity-provider-signup.md), [oauth-flow.md](../integrations/strava/oauth-flow.md)).
 
 Why the application database rather than a cache or a secrets manager: tokens are per-user records that participate in business transactions (creating a connection, marking it revoked, deleting a user for GDPR). They must be atomic with that relational state, queryable ("whose tokens expire within the hour"), and included in normal backups. This matches Spring Security's own `JdbcOAuth2AuthorizedClientService` approach. See [ADR 0003](../adr/0003-token-storage-strategy.md) for the full rationale, including why Redis-as-primary and Vault-as-primary were rejected.
 

@@ -15,8 +15,11 @@ Many users' Strava token refreshes are failing at once. If unaddressed, their `C
    (mark REVOKED, emit `IntegrationRevoked`). A **spike across many** is the alert condition and points
    at something systemic.
 2. **What's the error?** Check the refresh span / logs:
-   - `400 invalid_grant` across many users → unlikely to be coincidental real revocations; suspect a
-     **clock skew** bug (computing `expired?` wrong) or a **Strava-side** issue.
+   - `400` with `{"errors":[{"resource":"RefreshToken","code":"invalid"}]}` across many users →
+     unlikely to be coincidental real revocations; suspect a
+     **clock skew** bug (computing `expired?` wrong) or a **Strava-side** issue. Strava sends no
+     `invalid_grant` field — match on status + envelope
+     ([oauth-flow.md](../../integrations/strava/oauth-flow.md)).
    - Timeouts / 5xx from `/oauth/token` → Strava is down or throttling refreshes (refreshes count
      against the rate-limit budget — check the budget panel).
 3. **Clock check:** is the host clock correct? `expires_at` is an absolute epoch; a skewed clock makes
@@ -33,8 +36,10 @@ Many users' Strava token refreshes are failing at once. If unaddressed, their `C
 
 ## Resolve
 
-- Real revocations resolve themselves (user reconnects → fresh `ConnectedSource`). Systemic causes
-  (clock, Strava outage) resolve when the root cause is fixed; no per-user action needed.
+- Real revocations resolve themselves (user reconnects the Strava source via the connect flow —
+  `GET /connect/strava`, not a re-login, since Strava is no longer a login provider
+  ([ADR 0011](../../adr/0011-identity-provider-signup.md)) — yielding a fresh `ConnectedSource`).
+  Systemic causes (clock, Strava outage) resolve when the root cause is fixed; no per-user action needed.
 
 ## Prevent
 

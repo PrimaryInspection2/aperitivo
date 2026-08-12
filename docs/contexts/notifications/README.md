@@ -27,7 +27,10 @@ This BC is the natural home for the **SSE endpoint** (in-app real-time push) —
 
 ## Channels (MVP)
 
-- **EMAIL** — transactional email via SMTP.
+- **EMAIL** — transactional email via SMTP. The recipient address is not stored here: it is read from
+  IAM through the `UserContactReader` published port at delivery time. `users.email` is nullable, so
+  an account without an address simply has no EMAIL channel — that is a normal state, not a delivery
+  failure. See [domain-model.md](domain-model.md).
 - **IN_APP** — SSE stream to the authenticated user's open connection, if any. Persisted as an in-app inbox when there is no live connection.
 - **PUSH** — *deferred*. Requires a mobile app or web-push setup.
 

@@ -20,7 +20,7 @@ This is a pet project intended to demonstrate **staff-level engineering**. It is
 - Event-driven architecture in a modular monolith (Spring Modulith, in-process events)
 - Reliable integration with an external API that has rate limits, webhooks, and revocable OAuth tokens
 - Time-series analytics with TimescaleDB
-- OAuth2 login and self-issued JWT identity with Spring Security
+- OIDC identity-provider login (Google) and self-issued JWT identity with Spring Security
 - Full-stack observability with the OpenTelemetry stack
 - Bounded Context decomposition with explicit, documented rationale
 
@@ -31,7 +31,7 @@ Explicitly **out of scope**, even though they would be reasonable features for a
 - **Realtime live-streaming of in-progress workouts.** Strava webhooks fire post-activity only — there is no public API for live HR/pace/GPS streams. We do not attempt to fake this. See [ADR 0001](../adr/0001-no-strava-live-streaming.md).
 - **Social features: friend graph, public challenges, leaderboards, comments, likes.** Strava already does these well. Competing on social is out of scope. See [ADR 0006](../adr/0006-no-social-challenges.md).
 - **Multi-source data ingestion (Garmin, Wahoo, COROS) in MVP.** The architecture is designed to allow this later without painful migration, but MVP ships Strava-only.
-- **Alternative identity providers (Google, Apple, email) in MVP.** Same as above — model supports adding them later, MVP is Strava-only.
+- **Alternative identity providers beyond Google (Apple, email) in MVP.** Login is Google OIDC only; the model supports adding Apple/email later. Strava is **not** a login provider — it is a data source connected from inside the app after signup ([ADR 0011](../adr/0011-identity-provider-signup.md)).
 - **Mobile or web frontend.** This is a **backend** project. Any UI demos are minimal and exist only to exercise APIs.
 
 ## Architectural style
@@ -53,7 +53,7 @@ See [Bounded Contexts](bounded-contexts.md) for the full decomposition.
 | Persistence | PostgreSQL + TimescaleDB extension | Single OLTP DB for most BCs; TimescaleDB hypertables for time-series metrics in Analytics |
 | Inter-BC events | Spring Modulith application events (`event_publication` table) | Durable, transactional, in-process; no broker. Kafka-ready design, externalized later if needed |
 | Cache / locks | Redis | Hot data, rate-limit counters, distributed locks, optional `jti` blacklist |
-| Identity | Spring Security 6 (OAuth2 client + self-issued JWT, RS256) | Strava OAuth login; we mint our own OIDC-style JWT. No external identity server |
+| Identity | Spring Security 6 (OAuth2 client + self-issued JWT, RS256) | Google OIDC login; we mint our own OIDC-style JWT. Strava is a connected data source, not a login provider ([ADR 0011](../adr/0011-identity-provider-signup.md)). No external identity server |
 | Observability | OpenTelemetry, Prometheus, Grafana, Loki, Tempo | Traces, metrics, logs unified |
 | API | REST (Spring MVC), SSE for server push | No GraphQL, no WebSocket |
 | Frontend (demo) | Thymeleaf + HTMX | Minimal UI to exercise APIs; backend is the focus |
@@ -69,7 +69,7 @@ See [ADR 0007](../adr/0007-sse-not-websocket.md) for SSE-over-WebSocket rational
 
 ## Key constraints
 
-- **Strava is the single point of dependency.** If Strava revokes API access or significantly changes its terms, the product becomes non-functional. Accepted risk for a portfolio project.
+- **Strava is the single point of dependency for data.** If Strava revokes API access or significantly changes its terms, the product becomes non-functional as a data platform. Accepted risk for a portfolio project. Login additionally depends on Google (the identity provider) — a distinct external party in the critical path of every sign-in ([ADR 0011](../adr/0011-identity-provider-signup.md)).
 - **Strava rate limits:** 100 requests per 15 minutes, 1000 per day per access token. All ingestion logic must respect this. This — not JVM throughput — is the real bottleneck. See [Strava API quirks](../integrations/strava/api-quirks.md).
 - **Webhooks are unreliable:** Strava webhooks can be lost. Reconciliation via periodic sync is mandatory, not optional.
 - **Refresh tokens are long-lived but revocable:** Token lifecycle management is a first-class concern. See [ADR 0003](../adr/0003-token-storage-strategy.md).

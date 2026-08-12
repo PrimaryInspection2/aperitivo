@@ -11,6 +11,7 @@ Decomposition rationale: see [ADR 0005](../adr/0005-bounded-contexts.md). Event 
 ```mermaid
 flowchart LR
     subgraph External
+        Google[Google OIDC]
         Strava[Strava API]
     end
 
@@ -23,8 +24,9 @@ flowchart LR
         NOTIF[Notifications]
     end
 
-    Strava -- webhooks, OAuth, REST --> ING
-    Strava -- OAuth login --> IAM
+    Strava -- webhooks, REST --> ING
+    Google -- OIDC login --> IAM
+    Strava -- OAuth connect (link flow) --> IAM
     IAM -- ConnectedSource tokens (in-process) --> ING
     ING -- ActivityIngested --> CAT
     CAT -- WorkoutCreated/Updated/Deleted --> ANA
@@ -34,7 +36,7 @@ flowchart LR
     PLAN -- ScheduledSessionDue --> NOTIF
 ```
 
-All arrows labeled with event names are Spring Modulith application events delivered in-process after commit. Arrows for OAuth/REST/webhooks are external HTTP. The IAM → Ingestion token access is a synchronous in-process call through a published interface (`TokenManager`), not an event.
+All arrows labeled with event names are Spring Modulith application events delivered in-process after commit. Arrows for OAuth/REST/webhooks are external HTTP. The IAM → Ingestion token access and the IAM → Notifications contact-address lookup are synchronous in-process calls through published interfaces (`TokenManager`, `UserContactReader`), not events.
 
 ## Bounded Context catalog
 
@@ -44,19 +46,26 @@ All arrows labeled with event names are Spring Modulith application events deliv
 
 **Owns:**
 - `User` (internal UUID identity)
-- `ConnectedSource` (Strava OAuth tokens, lifecycle, encryption)
-- `TokenManager` (sole access point for Strava credentials)
-- Strava OAuth login (Spring Security OAuth2 client) and JWT issuance (Spring Security `JwtEncoder`, RS256)
+- `UserIdentity` (sign-in methods, keyed on `(provider, sub)` = `(issuer, sub)`; stores no tokens, has no status lifecycle)
+- `ConnectedSource` (data-source OAuth tokens — Strava today; lifecycle, encryption)
+- `TokenManager` (sole access point for data-source credentials)
+- `UserContactReader` (sole access point for the account's contact address)
+- Google OIDC login (Spring Security `oauth2Login`) and JWT issuance (Spring Security `JwtEncoder`, RS256)
+- Strava connect/link flow (Spring Security `oauth2Client`) — acquires data-source tokens for an already-authenticated user
 - User profile, preferences
 
-**Language:** User, ConnectedSource, IdentityProvider, AccessToken, RefreshToken, Revocation.
+Login never touches `connected_sources`; data sources are connected later, on demand, from inside the app ([ADR 0011](../adr/0011-identity-provider-signup.md)).
+
+**Language:** User, UserIdentity, ConnectedSource, IdentityProvider, AccessToken, RefreshToken, Revocation.
 
 **Publishes events:**
-- `UserRegistered`
-- `IntegrationConnected` (e.g. Strava just linked)
+- `UserRegistered` (a new `User` was created by the Google login flow — does **not** imply a data source exists)
+- `IntegrationConnected` (a `ConnectedSource` became ACTIVE via the connect/link flow — the sole trigger for ingestion backfill)
 - `IntegrationRevoked` (Strava access lost — token rejected by API, or explicit deauth webhook)
 
-**Consumes:** none from inside the system; consumes Strava OAuth callbacks and Strava deauthorization webhooks from outside.
+`UserRegistered` and `IntegrationConnected` now fire from **different flows at different times** ([ADR 0011](../adr/0011-identity-provider-signup.md)).
+
+**Consumes:** none from inside the system; consumes Google OIDC callbacks (login), Strava OAuth callbacks (connect/link flow), and Strava deauthorization webhooks from outside.
 
 **See:** [Identity & Access deep dive](../contexts/identity-access/README.md)
 
@@ -83,7 +92,7 @@ All arrows labeled with event names are Spring Modulith application events deliv
 
 **Consumes:**
 - `IntegrationRevoked` from IAM (to stop sync jobs for that user)
-- `IntegrationConnected` from IAM (to trigger initial backfill)
+- `IntegrationConnected` from IAM (to trigger initial backfill — the sole backfill trigger; signup no longer implies a source, see [ADR 0011](../adr/0011-identity-provider-signup.md))
 
 **See:** [Activity Ingestion deep dive](../contexts/activity-ingestion/README.md)
 
@@ -198,6 +207,9 @@ and `TrendDetected` were dropped — continuous state is queried, and trend dete
 - `IntegrationRevoked` from IAM
 - `ScheduledSessionDue`, `SessionCompleted`, `SessionMissed` from Planning
 - `IngestionFailed` from Ingestion
+- IAM's `UserContactReader` published port (synchronous read) — the recipient address for outbound
+  email. The only synchronous call Notifications makes into another BC; the address is read at
+  delivery time and never stored here.
 
 **See:** [Notifications deep dive](../contexts/notifications/README.md)
 

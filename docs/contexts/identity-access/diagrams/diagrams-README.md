@@ -36,11 +36,15 @@ Each BC owns its sequence diagrams under `contexts/{bc}/diagrams/sequence/`. Cur
 
 | Diagram | BC | Status |
 |---|---|---|
-| [strava-oauth-login.md](../contexts/identity-access/diagrams/sequence/strava-oauth-login.md) | Identity & Access | ✅ written |
+| [google-login.md](sequence/google-login.md) | Identity & Access | ✅ written |
+| [strava-connect.md](sequence/strava-connect.md) | Identity & Access | ✅ written |
+| [token-refresh.md](sequence/token-refresh.md) | Identity & Access | ✅ written |
+| [revocation-flow.md](sequence/revocation-flow.md) | Identity & Access | ✅ written |
 | [activity-ingestion-webhook.md](../../activity-ingestion/diagrams/sequence/activity-ingestion-webhook.md) | Activity Ingestion | ✅ written |
 | [initial-backfill.md](../../activity-ingestion/diagrams/sequence/initial-backfill.md) | Activity Ingestion | ✅ written |
-| [token-refresh.md](../contexts/identity-access/diagrams/sequence/token-refresh.md) | Identity & Access | ✅ written |
-| [revocation-flow.md](../contexts/identity-access/diagrams/sequence/revocation-flow.md) | Identity & Access | ✅ written |
+
+Sign-in and source connection are **two diagrams, not one**, because they are two flows with different callers, different Spring Security filters, and different tables — see [ADR 0011](../../../adr/0011-identity-provider-signup.md).
+
 
 ## Cross-BC ERDs
 

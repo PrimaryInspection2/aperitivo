@@ -55,7 +55,7 @@ sequenceDiagram
                 TM->>CSR: persist new access_token (AES-GCM), expires_at,<br/>refresh_token (whatever returned), last_refreshed_at
                 TM->>LK: release lock
                 TM-->>ING: StravaToken
-            else 400 invalid_grant (refresh token rejected)
+            else 400 RefreshToken invalid (dead refresh token)
                 ST-->>TM: 400
                 TM->>LK: release lock
                 TM->>CSS: markRevoked(userId, TOKEN_REJECTED)
@@ -86,8 +86,12 @@ sequenceDiagram
 - **Re-read under lock is the double-checked-locking pattern.** The thread that loses the race
   acquires the lock *after* the winner already refreshed — it must re-read and use the fresh token,
   not refresh again. This is why step "RE-READ row" exists.
-- **`400 invalid_grant` is a real revocation** — the refresh token itself is dead, so the source goes
-  `REVOKED(TOKEN_REJECTED)` and `IntegrationRevoked` fires. Contrast a `5xx`/timeout, which is
+- **A rejected refresh token is a real revocation** — Strava answers `400` with its own envelope,
+  `{"errors":[{"resource":"RefreshToken","field":"refresh_token","code":"invalid"}]}`. There is **no**
+  standard OAuth `invalid_grant` field, so classification keys on **status + envelope**
+  ([oauth-flow.md](../../../../integrations/strava/oauth-flow.md)). The refresh token itself is dead,
+  so the source goes `REVOKED(TOKEN_REJECTED)` and `IntegrationRevoked` fires. Contrast a
+  `5xx`/timeout, which is
   **transient** — the job retries, the token is *not* revoked, and existing access tokens keep
   working until expiry (the distinction the `token-refresh-failures` runbook leans on).
 - **Tokens are plaintext only in memory, only at use.** Decryption happens just before returning to

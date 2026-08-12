@@ -7,8 +7,8 @@ optional logout. The IAM domain model and API reference this note for the mechan
 
 ## What the token is
 
-A standard OIDC-style JWT, signed **RS256** (asymmetric). Issued by IAM on successful Strava
-OAuth login; validated by every BC acting as a Spring Security **resource server**. Because it
+A standard OIDC-style JWT, signed **RS256** (asymmetric). Issued by IAM on successful Google
+OAuth (OIDC) login; validated by every BC acting as a Spring Security **resource server**. Because it
 is a conventional JWT, the choice of issuer (us, today; Keycloak, hypothetically later) is
 invisible to API consumers — the swap path that [ADR 0009](../adr/0009-identity-spring-security.md)
 preserves.
@@ -23,11 +23,14 @@ exp  = expiry (iat + 24–72h)
 jti  = random UUID             // unique token id, for optional blacklist
 ```
 
-`sub` is always the internal `user_id`, never the Strava athlete id — the reasoning is in the
+`sub` is always the internal `user_id`, never a provider's subject id — the reasoning is in the
 [IAM domain model](../contexts/identity-access/domain-model.md#identity-tokens--the-sub-claim):
-`providerUserId` is an attribute of a *connected source*, would differ across providers, and
-would break identity the moment a user's provider set changes. No roles/authorities claim in
-MVP (single user type); when authorization arrives it is an additive claim.
+`providerUserId` is an attribute of a *provider account* (the Google `sub` on a `UserIdentity`, or a
+data source's athlete id on a `ConnectedSource`), would differ across providers, and would break
+identity the moment a user's provider set changes. The two `sub`s must never be conflated
+([ADR 0011](../adr/0011-identity-provider-signup.md)): the provider's `sub` is `providerUserId`;
+only the internal `user_id` is ever minted into our `sub`. No roles/authorities claim in MVP (single
+user type); when authorization arrives it is an additive claim.
 
 Why **asymmetric RS256, not symmetric HS256**: validation only needs the **public** key, so
 resource-server BCs (and, later, separately deployed services) verify without holding signing
@@ -47,8 +50,12 @@ JwtEncoder jwtEncoder(RSAKey rsaKey) {
 }
 ```
 
-Minting on successful login (inside `StravaOAuthService.handleCallback`, after the user is
-provisioned/resolved):
+Minting on successful login happens in the `AuthenticationSuccessHandler` of the **Google**
+`oauth2Login` flow, **after** the login callback service (`OAuth2CallbackService.login`) has
+committed and returned its `LoginResult` — outside that transaction, since the token is a transport
+concern of the login endpoint. The login transaction resolves the `User` by `(provider, sub)` in
+`user_identities`, creating one (and a `UserRegisteredEvent`) on first sight; it **never** touches
+`connected_sources` ([ADR 0011](../adr/0011-identity-provider-signup.md)):
 
 ```java
 Instant now = Instant.now();
@@ -145,8 +152,8 @@ reasoning that keeps the rate-limit budget in Redis. The denylist is bounded by
 
 ## What is deliberately NOT here (MVP)
 
-- **No refresh-token endpoint for our JWT.** On expiry the user re-authenticates via Strava (a
-  redirect, no re-consent if the Strava grant is still valid). Silent refresh is a later
+- **No refresh-token endpoint for our JWT.** On expiry the user re-authenticates via Google (a
+  redirect, no re-consent if the Google session is still valid). Silent refresh is a later
   optimization — see [IAM api.md](../contexts/identity-access/api.md).
 - **No opaque tokens / introspection endpoint.** We use self-contained JWTs validated by
   signature, not reference tokens needing a central introspection call.

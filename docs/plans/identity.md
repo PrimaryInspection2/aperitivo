@@ -7,6 +7,12 @@
 
 **Related BC deep dive:** [`docs/contexts/identity-access/`](../contexts/identity-access/README.md)
 
+> **Активний під-план:** [identity-adr-0011.md](identity-adr-0011.md) — покрокове завершення
+> міграції на [ADR 0011](../adr/0011-identity-provider-signup.md) (Google login + connect on
+> demand), з переліком доків для читання на кожен крок. Деталізує B.6, B.7, B.8, B.13 нижче
+> і додає те, чого в них не було. Поки він не закритий — працюй по ньому, а чекбокси тут
+> оновлюй за фактом.
+
 ---
 
 ## Phase A — Reading (концептуальний фундамент)
@@ -21,6 +27,8 @@
 - [x] **[ADR 0009 — Identity via Spring Security](../adr/0009-identity-spring-security.md)** — головна ADR для цього модуля.
 - [x] **[ADR 0003 — Token storage strategy](../adr/0003-token-storage-strategy.md)** — чому AES-GCM у нашій БД, а не Vault/Redis.
 - [x] **[ADR 0002 (superseded)](../adr/0002-identity-model-superseded.md)** — прочитати як контекст, зрозуміти чому Keycloak відкинули.
+- [ ] **[ADR 0011 — Identity-provider signup (Google); sources connected on demand](../adr/0011-identity-provider-signup.md)** — **керівна ADR редизайну**: логін тепер Google (OIDC), Strava — data source, що *підключається*. Вводить `UserIdentity` / `user_identities`, connect-flow (`oauth2Client`), `/api/me/sources`. Читати перед B.6/B.13.
+- [ ] **[ADR 0010 (superseded)](../adr/0010-single-canonical-login-provider-superseded.md)** — контекст: чому «Strava як єдиний login-провайдер» відкинуто на користь 0011 (лишились split login/link flow + «identity ніколи не виводиться неявно»).
 
 ### A.2 — IAM BC deep dive
 
@@ -29,7 +37,7 @@
 - [x] **[`contexts/identity-access/database.md`](../contexts/identity-access/database.md)** — схема, індекси, partial unique index.
 - [x] **[`contexts/identity-access/events.md`](../contexts/identity-access/events.md)** — `UserRegistered`, `IntegrationConnected`, `IntegrationRevoked` контракти.
 - [x] **[`contexts/identity-access/api.md`](../contexts/identity-access/api.md)** — REST endpoints, OAuth flow endpoints.
-- [x] **[Sequence: Strava OAuth login](../contexts/identity-access/diagrams/sequence/strava-oauth-login.md)** — читати разом з `api.md`.
+- [x] **[Sequence: Google login](../contexts/identity-access/diagrams/sequence/google-login.md)** + **[Sequence: Strava connect](../contexts/identity-access/diagrams/sequence/strava-connect.md)** — читати разом з `api.md`. ADR 0011 розділив старий `strava-oauth-login` на два потоки: login (Google) vs connect (Strava).
 - [x] **[Sequence: Token refresh](../contexts/identity-access/diagrams/sequence/token-refresh.md)** — механіка refresh з concurrency-lock.
 - [x] **[Sequence: Revocation flow](../contexts/identity-access/diagrams/sequence/revocation-flow.md)** — 3 шляхи revocation.
 
@@ -60,7 +68,7 @@
 - [x] **[Strava API Getting Started](https://developers.strava.com/docs/getting-started/)** — базовий огляд.
 - [x] **[Strava Authentication](https://developers.strava.com/docs/authentication/)** — офіційний опис OAuth 2.0 flow (не OIDC — важлива відмінність).
 - [x] **[Strava Webhooks](https://developers.strava.com/docs/webhooks/)** — subscription + delivery + deauth.
-- [x] **[Strava API Reference](https://developers.strava.com/docs/reference/)** — `/oauth/authorize`, `/oauth/token`, `/oauth/deauthorize`.
+- [x] **[Strava API Reference](https://developers.strava.com/docs/reference/)** — `/oauth/authorize`, `/oauth/token`, `/oauth/revoke` (legacy `/oauth/deauthorize` — до 2027-06-01; станом на 2026-08-07 `/oauth/revoke` віддає `503`, див. [oauth-flow.md](../integrations/strava/oauth-flow.md)).
 - [x] **[Strava Rate Limits](https://developers.strava.com/docs/rate-limits/)** — 100 req / 15 min, 1000 req / day.
 
 ### A.7 — Spring / Modulith external docs
@@ -79,7 +87,7 @@
 Кожен пункт — окрема ітерація. Assistant не пише код за тебе — він рев'ює, кидає виклик рішенням, підказує, коли треба.
 
 ### B.1 — Module skeleton
-- [x] Створити пакети `dev.amishko.aperitivo.identity` (base = API) + `dev.amishko.aperitivo.identity.internal` (private).
+- [x] Створити пакети `dev.amishko.aperitivo.identity` (base = API) + `dev.amishko.aperitivo.identity` (private).
 - [x] Створити `package-info.java` з `@ApplicationModule` метаданими (опційно).
 - [x] Написати `ModularityTests` з `ApplicationModules.of(...).verify()`.
 - [x] Переконатися, що `verify()` проходить (порожній модуль — теж валідний).
@@ -112,12 +120,44 @@
 - [x] `markRevoked(userId, provider, reason)` — set status, emit `IntegrationRevokedEvent` (див. C.7 щодо `provider`-параметра).
 - [x] `recordSuccessfulUse(userId)`, `recordFailure(userId, kind)` — audit trail (див. C.1 щодо семантики).
 
-### B.6 — Spring Security OAuth2 Client (Strava login)
-- [ ] `ClientRegistration` для Strava в `application.properties`.
-- [ ] `SecurityFilterChain` з `oauth2Login()`.
-- [ ] Custom `OAuth2UserService` — резолвить існуючого `User` або створює нового + `ConnectedSource`.
-- [ ] Emit `UserRegisteredEvent` (для нового), `IntegrationConnectedEvent` (завжди).
-- [ ] `AuthenticationSuccessHandler` — мінтить JWT і повертає (див. B.7).
+### B.5b — UserContactReader (другий published port IAM)
+
+> Закриває діру, знайдену при рев'ю: Notifications потрібна email-адреса для SMTP, але легального
+> крос-BC каналу до `users.email` не існувало (жодна подія її не несе, порту не було, а
+> `notifications/domain-model.md` прямо забороняє джойнити таблиці IAM).
+
+- [ ] Інтерфейс `UserContactReader` у `dev.amishko.aperitivo.identity` base package —
+      `Optional<String> emailFor(UUID userId)`. Read-only, `Optional` замість `null`.
+- [ ] Реалізація в `internal/` поверх `UserRepository` (проєкція на одну колонку, не весь entity).
+- [ ] **Не** класти адресу в payload подій: Modulith серіалізує payload у `event_publication`,
+      тож адреса durably копіювалась би в outbox чотирьох модулів-продюсерів.
+- [ ] Notifications викликає порт **двічі**: на dispatch (чи є адреса взагалі → якщо ні, EMAIL-канал
+      просто пропускається) і на send (яка адреса зараз). Копія в схемі Notifications не зберігається.
+- [ ] Тест `ApplicationModules.verify()` має лишатись зеленим; тест на те, що `users.email`
+      не з'являється в жодному event record.
+
+### B.6 — Spring Security OAuth2: Google login (`oauth2Login`), Strava більше не login
+
+> **⚠️ Переписано під [ADR 0011](../adr/0011-identity-provider-signup.md).** Раніше цей крок був
+> «Sign in with Strava»: Strava як login-провайдер через `oauth2Login`, а `OAuth2UserService`
+> створював `User` **і** `ConnectedSource` в одній транзакції, емітячи `UserRegisteredEvent` +
+> `IntegrationConnectedEvent` разом. ADR 0011 це **скасовує**: логін тепер лише Google (OIDC),
+> Strava — data source, що *підключається* окремим `oauth2Client` connect-flow (див. B.13). Старі
+> пункти лишені **закресленими** як запис спланованого; нові — нижче.
+
+**Скасовано (ADR 0011) — не реалізовувати:**
+- [ ] ~~`ClientRegistration` для Strava як **login**-registration (`/login/oauth2/code/strava`).~~ → тепер connect-registration `/connect/oauth2/code/strava` (B.13).
+- [ ] ~~`SecurityFilterChain` з `oauth2Login()` для Strava.~~ → Strava не login; login-chain тільки для Google.
+- [ ] ~~Custom `OAuth2UserService`, що резолвить/створює `User` **+ `ConnectedSource`**.~~ → login створює лише `User` (+ `UserIdentity`), без `ConnectedSource`; source створює connect-flow (B.13).
+- [ ] ~~Emit `UserRegisteredEvent` (новий) + `IntegrationConnectedEvent` (завжди) з login-callback.~~ → login емітить **лише** `UserRegisteredEvent`; `IntegrationConnectedEvent` — з connect-flow (B.13).
+
+**Google OIDC login (нове):**
+- [ ] `ClientRegistration` для Google в `application.yaml` — OIDC, scope `openid,email,profile`, `redirect-uri: {baseUrl}/login/oauth2/code/google`.
+- [ ] Login `SecurityFilterChain` з `oauth2Login()` — **тільки** identity-провайдери (Google). Жоден data-source registration не досяжний з login base-URI.
+- [ ] `OidcUserService` (стандартний Spring) — є ID token із стабільним `sub` + `email_verified`; кастомний `OAuth2UserService` для логіну **не потрібен** (на відміну від Strava).
+- [ ] `OAuth2CallbackService.login(profile)` — резолвить `User` за `(provider, sub)` у `user_identities`, створює `User` + `UserIdentity` для нового; емітить `UserRegisteredEvent` тільки для нового. **Ніколи не чіпає `connected_sources`.**
+- [ ] `AuthenticationSuccessHandler` — мінтить JWT (`sub` = internal `user_id`, **не** Google `sub`) і ставить cookie (див. B.7).
+- [ ] Integration-тест (anti-drift, ADR 0011 «Risks»): login-chain реєструє рівно identity-провайдерів; жодного `oauth2Login` для data source.
 
 ### B.7 — JwtEncoder + JWKS endpoint
 - [ ] RSA key pair loading — з config-property (base64 PEM) або файлу.
@@ -164,6 +204,37 @@
 - [ ] Стуб Strava для OAuth flow (MockWebServer / WireMock) — не додано.
 - [ ] Full OAuth login flow test — не додано (потребує B.6/B.7).
 
+### B.13 — ADR 0011: `UserIdentity` + Strava connect flow
+
+Нова робота з [ADR 0011](../adr/0011-identity-provider-signup.md): відділити **identity** (як людина
+логіниться) від **data source** (звідки тягнемо дані). `user_identities` — окрема таблиця, **без
+токенів**, **без status-lifecycle**; `connected_sources` лишається тільки для data sources (Strava
+сьогодні, Garmin/Wahoo пізніше). Механіка `TokenManager` / AES-GCM / refresh / revocation — **без
+змін**.
+
+**DB + entity + repository + міграція:**
+- [ ] Flyway міграція `user_identities` (identity schema, окремий changeset) — `user_id` FK → `users.id`; UNIQUE `(provider, provider_user_id)` = `(issuer, sub)`; **без** token-колонок, **без** `status`.
+- [ ] `UserIdentityEntity` — plain data (JPA/audit), enum `IdentityProvider` (напр. `GOOGLE`); `providerUserId` = provider `sub`.
+- [ ] `UserIdentityRepository` (Spring Data JPA) — `findByProviderAndProviderUserId(...)`.
+- [ ] `users.email` лишається **NULLABLE** (Strava email не дає; Google дає verified email; майбутній провайдер може не дати взагалі — ADR 0011).
+- [ ] **Не плутати два `sub`:** наш JWT `sub` = internal `user_id` (UUID); provider `sub` = `providerUserId` на `UserIdentity` (ADR 0011 «Risks», [naming.md](../conventions/naming.md)).
+
+**Strava connect chain (`oauth2Client`):**
+- [ ] `ClientRegistration` для Strava як **connect**-registration: `redirect-uri: {baseUrl}/connect/oauth2/code/strava`, grant `authorization_code`, scope `read,activity:read_all,profile:read_all`.
+- [ ] Connect `SecurityFilterChain` з `oauth2Client` (`OAuth2AuthorizationCodeGrantFilter`) — вимагає **автентифікованого** caller-а; code-exchange **не чіпає** `SecurityContext`, `user_id` беремо з JWT.
+- [ ] Явний `GET /api/v3/athlete` після code-exchange — бо `oauth2Client` (на відміну від `oauth2Login`) **не** викликає `OAuth2UserService`; звідти athlete `id` → `providerUserId` на `ConnectedSource`.
+- [ ] `OAuth2CallbackService.linkSource(userId, profile, tokens)` — створює/реактивує `ConnectedSource` (AES-GCM токени, `ACTIVE`); емітить `IntegrationConnectedEvent` (**єдиний** тригер backfill в Ingestion).
+- [ ] Конфлікт: provider-identity/source вже прив'язана до іншого `User` → `409 …/errors/identity-already-linked` (не re-assign, ADR 0011 §4).
+
+**Sources API (settings):**
+- [ ] `GET /api/me/sources` — підключені data sources поточного юзера.
+- [ ] `DELETE /api/me/sources/{provider}` — disconnect (`markRevoked`, `USER_REQUESTED`).
+- [ ] Onboarding-guard: поки немає жодного `ConnectedSource` — роутити юзера на `/connect/strava` (mandatory connect step, ADR 0011 §5).
+
+**Identity linking (додатковий sign-in метод):**
+- [ ] Лінкування другого identity-провайдера (Apple пізніше) з settings, автентифікованим юзером, тим самим link-flow — у MVP **документований seam**, не рантайм.
+- [ ] **Інваріант: не можна видалити останній sign-in метод** — сервер відхиляє видалення останнього `UserIdentity` (інакше юзер втрачає доступ до акаунта). Покрити тестом.
+
 ---
 
 ## Phase C — Hardening pass (concurrency, failure-mode consistency)
@@ -172,7 +243,7 @@
 
 ### C.1 — `recordFailure` / `recordSuccessfulUse` / `persistRefreshed`: counter semantics (audit-only)
 
-**Ключове правило (з `domain-model.md` + `events.md` розділ «What is deliberately NOT an event»):** ці методи — **аудит без побічних ефектів на `status`**. Ніякого `threshold`, ніякого auto-revoke. Revoke ініціює caller напряму через `TokenManager.markRevoked(...)` для всіх трьох сценаріїв (deauth, 401 на data, refresh invalid_grant — див. C.2).
+**Ключове правило (з `domain-model.md` + `events.md` розділ «What is deliberately NOT an event»):** ці методи — **аудит без побічних ефектів на `status`**. Ніякого `threshold`, ніякого auto-revoke. Revoke ініціює caller напряму через `TokenManager.markRevoked(...)` для всіх трьох сценаріїв (deauth, 401 на data, refresh `400 RefreshToken invalid` — див. C.2).
 
 - [x] **`recordSuccessfulUse(userId)`** — оновлює `lastUsedAt`, скидає `failureCount = 0`, `lastError = null`.
 - [x] **`recordFailure(userId, kind)`** — оновлює `lastUsedAt`, `lastError = kind.name()`, `failureCount++`. Не змінює `status`.
@@ -182,7 +253,7 @@
   ```
   200 OK                              → recordSuccessfulUse(userId)
   401 Unauthorized (data call)        → markRevoked(userId, TOKEN_REJECTED)
-  OAuthBadRequestException            → markRevoked(userId, TOKEN_REJECTED)   [refresh invalid_grant — dead token]
+  OAuthBadRequestException            → markRevoked(userId, TOKEN_REJECTED)   [refresh 400 RefreshToken/code=invalid — dead token]
   OAuthClientCredentialsException     → NOT markRevoked. Job → system_paused, re-queued.
                                          Circuit breaker при N-th разі відкривається (C.10) → alert.
                                          Не робимо @Retryable — credentials константні, retry не поможе.
@@ -314,7 +385,8 @@ _(observability-only; винесено з step-plan — обробляється
 - `Retryer.NEVER_RETRY` в обох клієнтах — retry делеговано caller-стороні (Resilience4j, коли з'явиться).
 
 **Next up (Phase B unfinished):**
-- B.6 Spring Security OAuth2 client (Strava login).
+- B.6 Google OIDC login (`oauth2Login` + `OidcUserService`) — **Strava-login скасовано** ([ADR 0011](../adr/0011-identity-provider-signup.md)).
+- B.13 `UserIdentity` (`user_identities`) + Strava **connect** flow (`oauth2Client`) + `/api/me/sources` ([ADR 0011](../adr/0011-identity-provider-signup.md)).
 - B.7 JwtEncoder + JWKS.
 - B.8 Resource server (JWT validation) + `GET /api/me`.
 - B.10 Problem Details for IAM controllers (blocked on B.6).
@@ -339,10 +411,10 @@ _(observability-only; винесено з step-plan — обробляється
 ## Dependency graph (короткий візуал)
 
 ```
-A.* (reading)  ─────  DONE
+A.* (reading)  ─────  DONE  (+ ADR 0010/0011 — до прочитання)
    ↓
-B.1..B.5 core          B.6..B.8 login/JWT       B.9 (partial) ── B.10 problem details ── B.11 logout
-   DONE                       TODO                                    TODO                    TODO
+B.1..B.5 core     B.6 Google login · B.13 identity+connect · B.7/B.8 JWT   B.9 (partial) ── B.10 problem details ── B.11 logout
+   DONE                       TODO (ADR 0011)                                    TODO                    TODO
    ↓                                                                                            ↑
 B.12 integration tests + Feign decoder unit tests (partial, expanding)                          │
                                                                                                 │

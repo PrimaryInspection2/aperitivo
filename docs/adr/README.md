@@ -29,6 +29,8 @@ Format adapted from [Michael Nygard's original ADR template](https://github.com/
 | [0007](0007-sse-not-websocket.md) | Server-Sent Events instead of WebSocket | Accepted |
 | [0008](0008-event-transport.md) | Event transport — Spring Modulith local events, no Kafka in MVP | Accepted |
 | [0009](0009-identity-spring-security.md) | Identity via Spring Security with own JWT issuer | Accepted |
+| [0010](0010-single-canonical-login-provider-superseded.md) | Single canonical login provider; additional sources linked by an authenticated user | Superseded by [0011](0011-identity-provider-signup.md) |
+| [0011](0011-identity-provider-signup.md) | Identity-provider signup (Google); data sources connected on demand | Accepted |
 
 ## Reading order
 
@@ -36,7 +38,8 @@ For someone new to the project, the decisions build on each other roughly in thi
 
 1. **0005** — how the system is split into Bounded Contexts.
 2. **0008** — how those contexts talk to each other (in-process events).
-3. **0009** — how users authenticate (Strava OAuth → our JWT).
+3. **0009** — how users authenticate (Spring Security → our JWT).
 4. **0004** — how users and their external connections are modeled.
-5. **0003** — where and how Strava tokens are stored.
-6. **0001, 0006, 0007** — scope boundaries (no live-streaming, no social, SSE not WebSocket).
+5. **0011** — who may create an account (an identity provider), and when data sources attach.
+6. **0003** — where and how Strava tokens are stored.
+7. **0001, 0006, 0007** — scope boundaries (no live-streaming, no social, SSE not WebSocket).
