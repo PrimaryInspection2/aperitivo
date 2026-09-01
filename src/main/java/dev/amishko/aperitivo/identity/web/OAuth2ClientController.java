@@ -13,7 +13,7 @@ public class OAuth2ClientController {
     @GetMapping("/")
     public ResponseEntity<String> index(Authentication authentication) {
 
-        log.info("Authentication: {}", authentication);
+        log.debug("Authentication: {}", authentication);
 
         return ResponseEntity.ok("Authentication: " + authentication);
     }
