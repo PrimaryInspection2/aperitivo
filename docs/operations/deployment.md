@@ -24,7 +24,7 @@ single process.
 docker-compose.yml
 ├── app                  ← the Aperitivo modular monolith (Spring Boot 4)
 ├── postgres             ← PostgreSQL + TimescaleDB extension (one instance, per-BC schemas)
-├── redis                ← rate-limit counters, jti denylist, locks
+├── redis                ← rate-limit counters, locks
 ├── otel-collector       ← receives OTel signals from app, fans out to the three backends
 ├── prometheus           ← metrics
 ├── tempo                ← traces
@@ -64,8 +64,10 @@ POSTGRES_URL, POSTGRES_USER, POSTGRES_PASSWORD
 REDIS_URL
 
 # App
-APP_BASE_URL                         # public HTTPS base (callback + issuer URIs derive from this)
-JWT_TTL                              # 24–72h
+APP_BASE_URL                         # public HTTPS base (issuer URI and the SPA's Strava redirect URI derive from this)
+ACCESS_TOKEN_TTL                     # 15m (ADR 0013)
+REFRESH_TOKEN_IDLE_TTL               # 14d
+REFRESH_FAMILY_MAX_TTL               # 30d
 
 # Observability
 OTEL_EXPORTER_OTLP_ENDPOINT          # → otel-collector
@@ -112,10 +114,11 @@ The MVP is **single-instance** by design, and two pieces of state assume it:
 
 - **The SSE emitter registry** is in-memory (`Map<UserId, List<SseEmitter>>`) — multi-instance needs
   sticky sessions or Redis pub/sub fan-out ([sse-streaming.md](../technical-notes/sse-streaming.md)).
-- Everything else (rate-limit counters, locks, jti denylist) is already in **Redis**, so it is
-  multi-instance-ready — the deliberate reason those live in Redis and not in-process
-  ([strava-rate-limits.md](../technical-notes/strava-rate-limits.md),
-  [jwt-and-keys.md](../technical-notes/jwt-and-keys.md)).
+- Everything else is already shared: rate-limit counters and locks in **Redis**, refresh tokens in
+  **Postgres** ([ADR 0013](../adr/0013-access-and-refresh-tokens.md)), and there is no HTTP session
+  ([ADR 0012](../adr/0012-spa-mobile-stateless-api.md)) — so it is multi-instance-ready, the
+  deliberate reason none of it lives in-process
+  ([strava-rate-limits.md](../technical-notes/strava-rate-limits.md)).
 
 So horizontal scaling is gated almost entirely by the SSE registry — a small, known piece of work,
 not a rearchitecture. Kubernetes, a read replica for the hypertable, and broker-externalized events

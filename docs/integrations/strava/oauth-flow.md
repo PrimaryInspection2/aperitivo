@@ -8,11 +8,18 @@ Strava's OAuth as it actually behaves. Our *handling* of it lives in IAM ([api.m
 **Strava is a data source that is *connected*, not a login provider.** Since
 [ADR 0011](../../adr/0011-identity-provider-signup.md) the user signs in with Google (an OIDC
 identity provider); the Strava OAuth flow below is a **connect** flow, initiated by an
-**already-authenticated** user from inside the app (`GET /connect/strava`). It creates **no `User`**
-and mints **no identity token** — the caller stays authenticated by our own JWT throughout. What it
-produces is a `ConnectedSource` holding the encrypted Strava tokens, and an `IntegrationConnectedEvent`.
-The Strava protocol itself — authorize URL, scopes, code exchange, token response, refresh, revocation
-— is **unchanged**; what changed is *who* starts it, *when*, and at *which* endpoints.
+**already-authenticated** user from inside the app. It creates **no `User`** and mints **no identity
+token** — the caller stays authenticated by our own access token throughout. What it produces is a
+`ConnectedSource` holding the encrypted Strava tokens, and an `IntegrationConnectedEvent`.
+
+**The flow is client-driven** ([ADR 0012](../../adr/0012-spa-mobile-stateless-api.md) §4). The
+**SPA owns the browser leg**: it builds the authorize URL, generates and verifies `state`, and
+receives the callback on its own route. The **backend owns the confidential leg**: it receives the
+code at `POST /api/connect/strava` with the user's bearer token and exchanges it server-side with the
+`client_secret`. There is no backend redirect endpoint, no `oauth2Client` redirect filter and no
+`/connect/**` path on the API. The Strava protocol itself — authorize URL, scopes, code exchange,
+token response, refresh, revocation — is **unchanged**; what changed is *who* starts it, *when*, and
+at *which* endpoints.
 
 ## What kind of OAuth Strava is
 
@@ -20,18 +27,18 @@ The Strava protocol itself — authorize URL, scopes, code exchange, token respo
 
 - There is **no ID token** and **no `/userinfo` OIDC endpoint** — to learn *which athlete* these
   tokens belong to, we call the **data** endpoint `GET /api/v3/athlete` after the token exchange.
-  In the connect flow this call is **explicit and our own**: Spring Security's `oauth2Client`
-  (`OAuth2AuthorizationCodeGrantFilter`), unlike `oauth2Login`, does **not** invoke an
-  `OAuth2UserService`, so nothing fetches the athlete for us — we fetch it ourselves right after the
-  code exchange. (Under the old `oauth2Login` login model this happened inside a custom
-  `OAuth2UserService`; that seam is gone — see [ADR 0011](../../adr/0011-identity-provider-signup.md).)
+  In the connect flow this call is **explicit and our own**: the code exchange
+  (`RestClientAuthorizationCodeTokenResponseClient`) returns only the token response and does
+  **not** invoke an `OAuth2UserService`, so nothing fetches the athlete for us — we fetch it ourselves
+  right after the code exchange.
 - There is **no discovery document** (`/.well-known/openid-configuration`) — the endpoints are
   fixed and configured explicitly.
 - The athlete id we get back **identifies the connected source, not the user.** It is stored as
   `providerUserId` on the `ConnectedSource` and used to key that source; it is **never** the user's
   identity. Aperitivo's identity is our own JWT `sub` (an internal UUID), issued by the Google login
   flow ([ADR 0009](../../adr/0009-identity-spring-security.md),
-  [ADR 0011](../../adr/0011-identity-provider-signup.md)) — a Strava token is never treated as an
+  [ADR 0011](../../adr/0011-identity-provider-signup.md),
+  [ADR 0012](../../adr/0012-spa-mobile-stateless-api.md)) — a Strava token is never treated as an
   identity assertion.
 
 ## Endpoints
@@ -45,42 +52,55 @@ The Strava protocol itself — authorize URL, scopes, code exchange, token respo
 | Deauthorize (legacy, removed 2027-06-01) | `https://www.strava.com/oauth/deauthorize` |
 
 We are a **confidential client** — the `client_secret` lives only on our backend, and the
-code-for-token exchange is server-to-server. The browser never sees the secret.
+code-for-token exchange is server-to-server. The browser sees the authorization `code` (single-use,
+useless without the secret) but never the secret, and never the Strava tokens.
 
 ## The flow, step by step
 
-The flow is started by an **already-authenticated** user hitting `GET /connect/strava` (Spring
-Security's `oauth2Client` authorization endpoint for the `strava` registration); the browser is then
-redirected to Strava. The current `user_id` is read from the caller's JWT — the code exchange never
-touches the `SecurityContext`, so the user stays logged in as themselves throughout.
+The flow is started by an **already-authenticated** user clicking "Connect Strava" in the SPA. The
+browser is redirected to Strava and back to an **SPA route**; the SPA then hands the code to the API.
+The current `user_id` is read **only** from the caller's bearer token — Strava contributes the athlete
+and the tokens, nothing else ([ADR 0011](../../adr/0011-identity-provider-signup.md),
+[ADR 0012](../../adr/0012-spa-mobile-stateless-api.md) §4).
 
 ```
-0. User → App:     GET /connect/strava  (authenticated; app-initiated connect)
-1. App → Browser:  302 to /oauth/authorize?client_id&redirect_uri&scope&state&response_type=code&approval_prompt=auto
+0. SPA:            generate state → sessionStorage
+1. SPA → Browser:  navigate to /oauth/authorize?client_id&redirect_uri=https://aperitivo.app/connect/strava/callback
+                                  &scope&state&response_type=code&approval_prompt=auto
 2. Browser → Strava:  user approves on Strava's consent screen
-3. Strava → App:   302 to redirect_uri (/connect/oauth2/code/strava)?code=...&scope=...&state=...
-4. App → Strava:   POST /oauth/token (client_id, client_secret, code, grant_type=authorization_code)
-5. Strava → App:   { access_token, refresh_token, expires_at, athlete:{...} }
-6. App → Strava:   GET /api/v3/athlete  (which athlete are these tokens for? — fetched explicitly)
-7. App:            linkSource(userId, athlete, tokens) → create/reactivate ConnectedSource
+3. Strava → SPA:   302 to redirect_uri (SPA route /connect/strava/callback)?code=...&scope=...&state=...
+4. SPA:            check state against sessionStorage, drop code from the URL,
+                   obtain a fresh access token if needed (POST /api/auth/refresh)
+5. SPA → API:      POST /api/connect/strava { code, scope }   + Authorization: Bearer <our access token>
+6. API → Strava:   POST /oauth/token (client_id, client_secret, code, grant_type=authorization_code)
+7. Strava → API:   { access_token, refresh_token, expires_at, athlete:{...} }
+8. API:            check granted scopes include activity:read_all (else 400, nothing linked)
+9. API → Strava:   GET /api/v3/athlete  (which athlete are these tokens for? — fetched explicitly)
+10. API:           link the source to userId (from the bearer) → create/reactivate ConnectedSource
                    (encrypted tokens, status=ACTIVE), publish IntegrationConnectedEvent
 ```
 
-Steps 1–2 and 4 are **Spring Security framework** behaviour (we supply the `ClientRegistration`, not
-a controller); with `oauth2Client` the framework stores an `OAuth2AuthorizedClient` **without
-authenticating anyone**. Steps 6–7 are our seams. Step 7 links the source to the **current** user —
-it does **not** create a `User` and does **not** mint a JWT (the user is already authenticated). The
-transaction is detailed in IAM ([api.md](../../contexts/identity-access/api.md),
+Steps 0–4 are **SPA** behaviour. `state` is what defeats a forged callback that would attach an
+attacker's Strava account to the victim's user, so the SPA must refuse to send a code whose `state`
+does not match. The client ID, scopes and redirect URI in step 1 are public values; how the SPA
+obtains them is decided at implementation time.
+
+Steps 6–7 use Spring Security's `RestClientAuthorizationCodeTokenResponseClient` with the existing
+`strava` `ClientRegistration` (we supply configuration, not HTTP code); it authenticates nobody and
+touches no `SecurityContext`. Steps 8–10 are our seams. Step 10 links the source to the **current**
+user — it does **not** create a `User` and does **not** mint a JWT (the user is already
+authenticated). The transaction is detailed in IAM ([api.md](../../contexts/identity-access/api.md),
 [domain-model.md](../../contexts/identity-access/domain-model.md)) and grounded in
-[ADR 0011](../../adr/0011-identity-provider-signup.md).
+[ADR 0011](../../adr/0011-identity-provider-signup.md) and
+[ADR 0012](../../adr/0012-spa-mobile-stateless-api.md).
 
 ### The token response includes the athlete
 
-A Strava quirk worth noting: the **token-exchange response itself** (step 5) already contains a
+A Strava quirk worth noting: the **token-exchange response itself** (step 7) already contains a
 `athlete` summary object. So in principle the athlete id is available without the separate
-`GET /api/v3/athlete`. We still make the explicit profile call (step 6) because it is the clean,
+`GET /api/v3/athlete`. We still make the explicit profile call (step 9) because it is the clean,
 documented way to obtain the athlete and decouples athlete-loading from the token-grant shape — and
-because, with `oauth2Client`, nothing loads it for us — but implementers should know the athlete
+because the token response client loads nothing for us — but implementers should know the athlete
 summary rides along on the token response too.
 
 ## Scopes
@@ -101,13 +121,14 @@ read,activity:read_all,profile:read_all
 - Scopes are **comma-separated**, not space-separated (the OAuth spec allows either; Strava uses
   commas). Spring Security's `ClientRegistration` must be configured accordingly.
 - The user can **deselect** scopes on the consent screen. The granted scopes come back on the
-  callback (`scope=` param) and in the token response — we must check that `activity:read_all` was
-  actually granted, not assume it. Without it, ingestion can only see public activities, which we
-  treat as an incomplete connection.
+  callback (`scope=` param, which the SPA forwards) and in the token response — the backend must
+  check that `activity:read_all` was actually granted, not assume it. Without it, ingestion can only
+  see public activities, so the backend **rejects** the connection
+  ([ADR 0012](../../adr/0012-spa-mobile-stateless-api.md) §4).
 - `approval_prompt=auto` (vs `force`) means a returning user who already granted consent is not
-  re-prompted — the redirect round-trips silently. This is what makes a **reconnect** (e.g. after a
-  prior revoke, when the Strava grant is still valid) a seamless redirect rather than a fresh consent
-  screen.
+  re-prompted — the redirect round-trips silently back to the SPA callback route. This is what makes
+  a **reconnect** (e.g. after a prior revoke, when the Strava grant is still valid) a seamless
+  redirect rather than a fresh consent screen.
 
 ## Tokens
 
@@ -205,9 +226,10 @@ storage is needed (pattern 1 in
 
 | Case | Strava behaviour | Our handling |
 |---|---|---|
-| User denies consent | redirect with `error=access_denied` | Spring Security failure handler → back to the app (connect/settings) with an error; nothing linked |
-| `activity:read_all` not granted | callback `scope=` omits it | treat as incomplete connection; prompt to reconnect with full scope |
-| Code exchange fails | `400` from `/oauth/token` | connect fails; no `ConnectedSource`, no event (the `User` is untouched — it already exists) |
+| User denies consent | redirect to the SPA callback with `error=access_denied` | the SPA callback page shows the error and offers to retry; the API is never called; nothing linked |
+| `state` mismatch / missing | n/a (forged or stale callback) | the SPA rejects the callback and does **not** send the code to the API; nothing linked |
+| `activity:read_all` not granted | callback `scope=` omits it | the backend rejects `POST /api/connect/strava` with `400` (Problem Details); nothing linked; the SPA prompts to reconnect with full scope |
+| Code exchange fails | `400` from `/oauth/token` | connect fails with an error response; no `ConnectedSource`, no event (the `User` is untouched — it already exists) |
 | Refresh-token rejected | `400` + `{"errors":[{"resource":"RefreshToken","code":"invalid"}]}` | mark `ConnectedSource` `REVOKED`, emit `IntegrationRevoked` |
 
 **Strava does not use standard OAuth 2.0 error bodies on these.** There is no `error=invalid_grant`
@@ -228,23 +250,25 @@ string — that field does not exist on the wire. The consumers of this rule are
 [token-refresh sequence](../../contexts/identity-access/diagrams/sequence/token-refresh.md) and the
 [token-refresh-failures runbook](../../operations/runbooks/token-refresh-failures.md).
 
-Because linking is **one transaction**, a failure anywhere in the post-callback steps rolls back
+Because linking is **one transaction**, a failure anywhere in the post-exchange steps rolls back
 the whole thing — including the `event_publication` rows — so no event is ever delivered for a
 connect that didn't fully succeed (the Outbox property, see
 [idempotency-and-outbox.md](../../technical-notes/idempotency-and-outbox.md)).
 
 ## Configuration summary (Spring Security `ClientRegistration`)
 
-Strava is registered as an `oauth2Client` (connect), **not** an `oauth2Login` (login) registration —
-the redirect URI lives under `/connect/**`, which is what routes the callback through
-`OAuth2AuthorizationCodeGrantFilter` instead of the login filter ([ADR 0011](../../adr/0011-identity-provider-signup.md)):
+Strava is a `ClientRegistration` used **only as configuration** for the server-side code exchange
+(`RestClientAuthorizationCodeTokenResponseClient`); no Spring Security filter serves it — no
+`oauth2Login`, no `oauth2Client` redirect filter ([ADR 0012](../../adr/0012-spa-mobile-stateless-api.md) §4).
+The redirect URI is the **SPA route**: Strava redirects the browser there, and the same value is
+sent with the code exchange:
 
 ```yaml
 spring.security.oauth2.client.registration.strava:
   client-id:     ${STRAVA_CLIENT_ID}
   client-secret: ${STRAVA_CLIENT_SECRET}
   authorization-grant-type: authorization_code
-  redirect-uri: "{baseUrl}/connect/oauth2/code/strava"
+  redirect-uri: "https://aperitivo.app/connect/strava/callback"   # SPA route; per environment
   scope: read,activity:read_all,profile:read_all
 spring.security.oauth2.client.provider.strava:
   authorization-uri: https://www.strava.com/oauth/authorize
@@ -253,19 +277,21 @@ spring.security.oauth2.client.provider.strava:
 ```
 
 There is **no `OAuth2UserService`** in the connect flow, so `user-info-uri` / `user-name-attribute`
-are **not** framework-consumed the way they are under `oauth2Login`: `oauth2Client` never calls a
-user-info service. We fetch `GET /api/v3/athlete` **ourselves** after the code exchange to obtain the
+are **not** framework-consumed the way they are under `oauth2Login`: the token response client never
+calls a user-info service. We fetch `GET /api/v3/athlete` **ourselves** after the code exchange to obtain the
 Strava athlete `id` that keys the `ConnectedSource` — our internal identity is our own UUID, never
 this id, and the identity JWT is minted by the separate Google login flow
-([jwt-and-keys.md](../../technical-notes/jwt-and-keys.md)).
+([jwt-and-keys.md](../../technical-notes/jwt-and-keys.md)). The `client_secret` stays on the server;
+the SPA never needs it.
 
 ## Related
 
-- [IAM api.md](../../contexts/identity-access/api.md) — the `/connect/**` and `/api/me/sources` surface that drives this flow
+- [IAM api.md](../../contexts/identity-access/api.md) — the `POST /api/connect/strava` and `/api/me/sources` surface that drives this flow
 - [IAM domain-model.md](../../contexts/identity-access/domain-model.md) — `linkSource`, `ConnectedSource`, the `sub = user_id` rule
 - [token-management.md](../../technical-notes/token-management.md) — refresh, revocation, concurrency
 - [jwt-and-keys.md](../../technical-notes/jwt-and-keys.md) — the identity JWT (issued by the Google login flow, not this connect flow)
 - [api-quirks.md](api-quirks.md) — rate limits that refresh calls count against
 - [webhooks.md](webhooks.md) — deauthorization-as-webhook
 - [ADR 0011](../../adr/0011-identity-provider-signup.md) — Strava demoted to a connected data source; login is Google
+- [ADR 0012](../../adr/0012-spa-mobile-stateless-api.md) — client-driven connect: the SPA owns the browser leg, the backend the code exchange
 - [ADR 0009](../../adr/0009-identity-spring-security.md), [ADR 0003](../../adr/0003-token-storage-strategy.md)

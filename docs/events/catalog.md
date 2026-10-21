@@ -28,8 +28,7 @@ See [conventions.md](conventions.md) for the full set. In brief:
 
 Full contracts: [identity-access/events.md](../contexts/identity-access/events.md).
 
-> Since [ADR 0011](../adr/0011-identity-provider-signup.md), `user-registered` and
-> `integration-connected` are published by **different flows at different times**:
+> `user-registered` and `integration-connected` are published by **different flows at different times**:
 > `UserRegisteredEvent` from the Google login flow when a new `UserEntity` is created,
 > `IntegrationConnectedEvent` from the Strava connect/link flow when a `ConnectedSource` becomes
 > ACTIVE. A newly registered user has no data source until they connect one, so

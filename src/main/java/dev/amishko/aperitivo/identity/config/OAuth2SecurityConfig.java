@@ -1,56 +1,57 @@
 package dev.amishko.aperitivo.identity.config;
 
+import jakarta.servlet.DispatcherType;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
-import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizationRequestResolver;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.AuthenticationFailureHandler;
-import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
-import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 
-import static org.springframework.security.config.Customizer.withDefaults;
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 
 @Configuration
+@RequiredArgsConstructor
 public class OAuth2SecurityConfig {
 
-    private static final String CONNECT_AUTHORIZATION_BASE_URI = "/connect";
+    // Unauthenticated infra endpoints. Actuator is open here by design: it is
+    // network-restricted at the edge, not by Spring Security (docs/operations/security.md).
+    private static final String[] PUBLIC_INFRA_PATTERNS = {
+            "/.well-known/**",
+            "/swagger-ui.html",
+            "/swagger-ui/**",
+            "/v3/api-docs/**",
+            "/v3/api-docs.yaml",
+            "/actuator/health/**",
+            "/actuator/prometheus"
+    };
 
     @Bean
     @Order(1)
-    SecurityFilterChain apiChain(HttpSecurity http) {
+    SecurityFilterChain apiChain(HttpSecurity http, JwtDecoder jwtDecoder) {
         http.securityMatcher("/api/**")
                 .authorizeHttpRequests(a -> a.anyRequest().authenticated())
-                .sessionManagement(s -> s.sessionCreationPolicy(STATELESS))
-                .csrf(c -> c.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()));
-               /* .oauth2ResourceServer(rs -> rs
-                        .bearerTokenResolver(new DefaultBearerTokenResolver()) //fixme create custom BearerTokenResolver
-                        .jwt(withDefaults())
-                );*/
+                .sessionManagement(session -> session.sessionCreationPolicy(STATELESS))
+                //.userDetailsService(userDetailsService) // No authentication manager needed for JWT?
+                .oauth2ResourceServer(oauth2 -> oauth2
+                        .jwt(jwt -> jwt
+                                .decoder(jwtDecoder)))
+                .csrf(AbstractHttpConfigurer::disable); //check against refresh token cookie
         return http.build();
     }
 
     @Bean
     @Order(2)
-    SecurityFilterChain browserChain(HttpSecurity http,
-                                     ClientRegistrationRepository clientRegistrationRepository,
-                                     LoginProperties loginProperties,
-                                     AuthenticationSuccessHandler successHandler,
-                                     AuthenticationFailureHandler failureHandler) {
-        http.authorizeHttpRequests(a -> a
-                        .requestMatchers("/", "/login", "/error", "/.well-known/jwks.json").permitAll()
-                        .anyRequest().authenticated())
-                .oauth2Login(o -> o
-                        .loginPage(loginProperties.authorizationRequestUri())
-                        .successHandler(successHandler)
-                        .failureHandler(failureHandler))
-                .oauth2Client(c -> c.authorizationCodeGrant(g -> g
-                        .authorizationRequestResolver(new DefaultOAuth2AuthorizationRequestResolver(
-                                clientRegistrationRepository, CONNECT_AUTHORIZATION_BASE_URI))))
-                .csrf(withDefaults());
+    SecurityFilterChain fallbackChain(HttpSecurity http) {
+        http.authorizeHttpRequests(requests -> requests
+                // The container's ERROR dispatch to /error is re-authorized too; without this
+                // a 404/500 of a permitted endpoint is masked as 403.
+                .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                .requestMatchers(PUBLIC_INFRA_PATTERNS).permitAll()
+                .anyRequest().denyAll());
         return http.build();
     }
+
 }

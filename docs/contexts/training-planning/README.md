@@ -19,9 +19,9 @@ A `Plan` is a multi-week structured program. Each `ScheduledSession` belongs to 
 
 When a `WorkoutCreated` event arrives, Planning attempts to match it to a pending `ScheduledSession` based on date proximity + sport + target similarity. The match produces a `Compliance` score and a `SessionCompleted` event; a later `WorkoutUpdated` re-evaluates the match and `WorkoutDeleted` un-matches it. Sessions whose window elapses unmatched become `SessionMissed`.
 
-## The TSS decoupling (resolved)
+## The TSS decoupling
 
-The bounded-contexts overview previously flagged an open question: does a TSS-valued `PlannedTarget` couple Planning to Analytics? **Resolved:** a `PlannedTarget` of type `TSS` stores a **planned number that Planning owns** (authoring-time intent). MVP compliance is computed from directly-readable workout dimensions (distance/duration/pace) — Planning does **not** read Analytics' actual TSS. A TSS-accurate compliance, if ever wanted, would read Analytics via its published read port — a deferred, additive enhancement. So there is **no cross-BC coupling in the MVP matching path**; Planning runs even if Analytics is down. See [domain-model.md](domain-model.md).
+Does a TSS-valued `PlannedTarget` couple Planning to Analytics? **No:** a `PlannedTarget` of type `TSS` stores a **planned number that Planning owns** (authoring-time intent). MVP compliance is computed from directly-readable workout dimensions (distance/duration/pace) — Planning does **not** read Analytics' actual TSS. A TSS-accurate compliance, if ever wanted, would read Analytics via its published read port — a deferred, additive enhancement. So there is **no cross-BC coupling in the MVP matching path**; Planning runs even if Analytics is down. See [domain-model.md](domain-model.md).
 
 ## Key invariants
 

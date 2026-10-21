@@ -1,6 +1,6 @@
 # Identity & Access — Database Schema
 
-Physical schema for the IAM Bounded Context: tables, columns, constraints, indexes, and migration notes. Derived directly from the [domain model](domain-model.md).
+Physical schema for the IAM Bounded Context: tables, columns, constraints, indexes, and migration notes. Derived directly from the [domain model](domain-model.md). Tables: `users`, `user_identities`, `connected_sources`, and `refresh_tokens` (our own refresh tokens, [ADR 0013](../../adr/0013-access-and-refresh-tokens.md)).
 
 Conventions: snake_case identifiers; UUID primary keys; `timestamptz` for all instants (stored UTC); migrations are Flyway per-BC changesets applied at startup.
 
@@ -95,6 +95,35 @@ Notes:
 - `scopes` is a native Postgres `TEXT[]`, mapped by the custom array type. Small fixed set; never queried element-wise, so an array beats a join table here.
 - `version` backs Hibernate `@Version` optimistic locking, used to serialize concurrent token refreshes.
 
+### refresh_tokens
+
+Our own refresh tokens — one row per issued token. Introduced by [ADR 0013](../../adr/0013-access-and-refresh-tokens.md). Written by login (a new family) and by every refresh (a rotation); read only by `POST /api/auth/refresh` and `POST /api/auth/logout`, **never** on an ordinary API request.
+
+```sql
+CREATE TABLE refresh_tokens (
+    id          UUID        PRIMARY KEY,
+    token_hash  BYTEA       NOT NULL,    -- SHA-256 of the opaque token; never the token itself
+    user_id     UUID        NOT NULL,
+    family_id   UUID        NOT NULL,    -- one sign-in on one device; shared by every rotation
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used_at     TIMESTAMPTZ NULL,        -- set when rotated; a second presentation is reuse
+    revoked_at  TIMESTAMPTZ NULL,        -- set on logout or family revocation
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT fk_refresh_tokens_user
+        FOREIGN KEY (user_id) REFERENCES users (id)
+);
+```
+
+Notes:
+- **Only a hash is stored.** The token is 256 random bits, base64url-encoded, handed to the client once; the table keeps its SHA-256. A leaked table therefore contains nothing that can be presented as a token. Because the input is high-entropy random data, a plain unsalted hash is sufficient — there is nothing to brute-force, and the lookup must be by exact hash.
+- **This is not Google's refresh token** and not Strava's. Google tokens are never stored at all; Strava's live encrypted on `connected_sources`. This table holds only tokens **we** issued, so it needs no encryption key.
+- **`family_id` groups a chain of rotations.** Login creates a new family; each `POST /api/auth/refresh` marks the presented row `used_at = now` and inserts its successor with the same `family_id`. Presenting a row whose `used_at` is already set (outside the 10–30 s grace window) revokes **every** row of the family. Logout revokes the family; "log out everywhere" revokes every family of the user.
+- **`expires_at` is the 14-day idle expiry** of that one token, reset by each rotation. The **30-day absolute lifetime** of a family is measured from the family's first row; whether it is derived from the oldest `created_at` or carried on each row is specified at implementation time.
+- **No `status` column.** A row is valid when `used_at IS NULL AND revoked_at IS NULL AND expires_at > now()`; the two nullable timestamps carry the "why not" as well as the "when".
+- **No device or user-agent columns** in MVP. A future device list is an additive migration.
+- `user_id` is a plain FK column, not a JPA association — the same persistence policy as the other IAM tables.
+
 ## Constraints and indexes
 
 ```sql
@@ -135,6 +164,26 @@ CREATE INDEX ix_connected_sources_user_provider
 -- Reconciliation / proactive refresh sweeps: find ACTIVE sources by expiry.
 CREATE INDEX ix_connected_sources_status_expiry
     ON connected_sources (status, access_token_expires_at);
+
+-- ---------- refresh_tokens ----------
+
+-- The refresh lookup: one indexed read by hash. Also guarantees no two rows
+-- ever share a token.
+ALTER TABLE refresh_tokens
+    ADD CONSTRAINT uq_refresh_tokens_token_hash
+    UNIQUE (token_hash);
+
+-- "All sessions of this user" — log out everywhere, a future device list.
+CREATE INDEX ix_refresh_tokens_user
+    ON refresh_tokens (user_id);
+
+-- Family revocation on logout and on detected reuse.
+CREATE INDEX ix_refresh_tokens_family
+    ON refresh_tokens (family_id);
+
+-- Cleanup job: delete rows past expires_at.
+CREATE INDEX ix_refresh_tokens_expires_at
+    ON refresh_tokens (expires_at);
 ```
 
 Index rationale:
@@ -144,6 +193,10 @@ Index rationale:
 - `uq_…_active_per_user_provider` enforces invariant 5. Making it **partial** (`WHERE status <> 'REVOKED'`) lets a revoked row coexist with an active one for the same `(user, provider)`.
 - `ix_…_user_provider` serves the hottest read — `findByUserIdAndProvider` on every token access. (It overlaps the partial unique index but is unconditional, so it also covers revoked rows for audit/history reads.)
 - `ix_…_status_expiry` serves periodic sweeps: reconciliation (`findByStatus(ACTIVE)`) and any future proactive-refresh job ("ACTIVE sources expiring within the hour").
+- `uq_refresh_tokens_token_hash` serves every `POST /api/auth/refresh` and `POST /api/auth/logout`: the presented token is hashed and looked up in one indexed read. At roughly one refresh per active user every 15 minutes this is the table's only hot path, and it is still trivial load ([ADR 0013](../../adr/0013-access-and-refresh-tokens.md) §6).
+- `ix_refresh_tokens_family` makes "revoke the whole family" a single indexed `UPDATE … SET revoked_at = now() WHERE family_id = ?`.
+- `ix_refresh_tokens_user` serves "log out everywhere" (revoke every family of the user).
+- `ix_refresh_tokens_expires_at` serves the periodic job that deletes expired rows, which keeps the table from growing without bound.
 
 ### What reconnect actually does
 
@@ -169,6 +222,7 @@ So the common case is in-place reactivation, which means **`connectedSourceId` i
 | `scopes: String[]` | `scopes TEXT[]` | custom `StringArrayType` |
 | `version: long` | `version BIGINT` | `@Version` |
 | `createdAt/updatedAt` | `created_at/updated_at` | `@CreationTimestamp` / `@UpdateTimestamp` |
+| `RefreshTokenEntity.tokenHash: byte[]` | `token_hash BYTEA` | plain column; hashing happens in `RefreshTokenService`, not in a converter — the raw token never reaches the entity |
 
 The DB `DEFAULT now()` on timestamps is a safety net; in practice Hibernate populates them via the audit annotations. `version` defaults to 0 for rows created outside the ORM (there shouldn't be any, but the default keeps optimistic locking sane).
 
@@ -180,14 +234,17 @@ The DB `DEFAULT now()` on timestamps is a safety net; in practice Hibernate popu
   2. `V2__create_users_table.sql` — `users`.
   3. `V3__create_connected_sources_table.sql` — `connected_sources`, FK, unique constraint, indexes.
   4. `V4__create_user_identities_table.sql` — `user_identities`, FK, both unique constraints, index. Introduced by [ADR 0011](../../adr/0011-identity-provider-signup.md).
-- `V4` is **additive only**. `users` keeps its shape, `connected_sources` keeps its shape; the change is that login now writes to a new table and stops writing to `connected_sources`. Nothing needs backfilling in a pre-launch system — and had there been production rows, the backfill would have been impossible in principle, since a Strava-provisioned account has no Google `sub` to migrate.
-- Encryption is an **application** concern: there is no DB-side crypto, and `user_identities` stores no secrets at all. A migration never needs the encryption key. This keeps key material out of the migration tool entirely.
+  5. A new changeset creates `refresh_tokens`, its FK, the unique `token_hash` constraint and the three indexes. Introduced by [ADR 0013](../../adr/0013-access-and-refresh-tokens.md); its version number is assigned when it is written.
+- **Test-only migrations use versions from `V900` up** (today `V999__create_event_publication_table_for_itest.sql` under `src/test-integration/resources/db/migration/identity`). Integration tests put test resources on the same classpath location, so a test migration with a low number collides with the next production one, and Flyway refuses to start.
+- `V4` is **additive only**: `users` and `connected_sources` keep their shape. Login writes only to `users` and `user_identities`, never to `connected_sources`.
+- Encryption is an **application** concern: there is no DB-side crypto, and neither `user_identities` nor `refresh_tokens` stores a secret (the latter holds only hashes). A migration never needs the encryption key. This keeps key material out of the migration tool entirely.
 - Adding a data-source provider later (e.g. `GARMIN`) requires **no migration** — `provider` is `TEXT`, the change is in the application `Provider` enum. The same holds for adding a sign-in provider (`APPLE`) to `user_identities`. This is the payoff of storing enums as strings.
 
 ## What is intentionally NOT here
 
 - **No token columns on `user_identities`.** See the table notes above: an identity provider is used once per login and never called on the user's behalf afterwards.
-- **No `tokens` or `sessions` table.** Identity tokens (our JWT) are stateless; we do not persist them. Optional logout uses a `jti` blacklist in **Redis**, not Postgres (see the JWT technical note).
+- **No `sessions` table, and no table of access tokens.** Our access tokens are stateless JWTs validated by signature alone; we do not persist them, and there is no per-request `jti` denylist in the MVP. The only server-side token state is `refresh_tokens` above — in Postgres rather than Redis, for durability and relational queries ([ADR 0013](../../adr/0013-access-and-refresh-tokens.md) §6). There is no `HttpSession` to persist either ([ADR 0012](../../adr/0012-spa-mobile-stateless-api.md)).
+- **No Google tokens anywhere.** The Google ID token is verified at login and discarded.
 - **No `roles` / `authorities` table in MVP.** There is a single user type. If role-based authorization arrives later, it is an additive migration.
 - **No audit-log table in MVP.** Token-access auditing is via structured logs and OTel spans (see [token-management.md](../../technical-notes/token-management.md)), not a DB table. A dedicated audit table can be added later if GDPR "what did you do with my data" reporting needs it.
 - **No account-merge table.** Two accounts are never merged; there is nothing to record. See the alternatives section of [ADR 0011](../../adr/0011-identity-provider-signup.md) for why.

@@ -9,7 +9,7 @@ Style: Spring layered (see [ADR 0005](../../adr/0005-bounded-contexts.md)) — e
 IAM answers three questions:
 1. **Who is this user?** — the internal `UserEntity` (a stable UUID identity), reached through one or more `UserIdentityEntity` sign-in methods.
 2. **What external sources have they connected, and are those connections healthy?** — `ConnectedSourceEntity` and its lifecycle.
-3. **How do we authenticate them and let the rest of the system authorize them?** — Google OIDC login plus our own JWT issuance.
+3. **How do we authenticate them and let the rest of the system authorize them?** — Google ID-token login, then our own short-lived access token and rotating refresh token ([ADR 0012](../../adr/0012-spa-mobile-stateless-api.md), [ADR 0013](../../adr/0013-access-and-refresh-tokens.md)), surfaced to other modules as a `CurrentUser` principal.
 
 ### Identity is not a data source
 
@@ -140,6 +140,32 @@ public class ConnectedSourceEntity {
 }
 ```
 
+### RefreshTokenEntity
+
+One refresh token **we** issued — not Google's, not Strava's. Introduced by [ADR 0013](../../adr/0013-access-and-refresh-tokens.md). A chain of rotations shares a `familyId`, which stands for one sign-in on one device.
+
+```java
+@Entity
+@Table(name = "refresh_tokens")
+public class RefreshTokenEntity {
+    @Id
+    private UUID id;
+
+    private byte[] tokenHash;             // SHA-256 of the opaque token — the token itself is never stored
+    private UUID userId;                  // id-reference to UserEntity (NOT a JPA association)
+    private UUID familyId;                // shared by every rotation of one sign-in
+
+    private Instant expiresAt;            // idle expiry of this token
+    private Instant usedAt;               // nullable; set when rotated
+    private Instant revokedAt;            // nullable; set on logout or family revocation
+
+    @CreationTimestamp
+    private Instant createdAt;
+}
+```
+
+Like the other entities it is plain data: whether a row is valid, whether a presentation is reuse, and when a family has outlived its absolute lifetime are decided in `RefreshTokenService`, below.
+
 ### Enums and value objects
 
 No suffix (they are domain types, per the naming convention).
@@ -174,14 +200,18 @@ public record ProviderIdentityProfile(IdentityProvider provider, String provider
 public record LoginResult(UUID userId, boolean isNewUser) {}  // what login returns
 
 public record StravaToken(String accessToken) {}   // what TokenManager hands to Ingestion
+
+public record CurrentUser(UUID userId) {}          // the authenticated principal — IAM published API
 ```
+
+`CurrentUser` is what every other module sees of authentication. The resource server converts our validated access token into it (`userId` = the token's `sub`); controllers in any BC take it as the principal and never touch JWT or OAuth types.
 
 `IdentityProvider` and `Provider` are **two enums, deliberately**. A single merged enum would imply a `GOOGLE` value is a legal argument to `TokenManager.getValidAccessToken` or to `findByUserIdAndProvider` on `connected_sources` — the compiler should reject that, not a code reviewer.
 
 
 ## Persistence policy — Hibernate use in IAM
 
-IAM deliberately uses **no JPA associations**. `ConnectedSourceEntity.userId` is a plain `UUID`, not a `@ManyToOne UserEntity`. Navigation is via repository methods.
+IAM deliberately uses **no JPA associations**. `ConnectedSourceEntity.userId` is a plain `UUID`, not a `@ManyToOne UserEntity`, and the same holds for `UserIdentityEntity.userId` and `RefreshTokenEntity.userId`. Navigation is via repository methods.
 
 Rationale:
 - `UserEntity` and `ConnectedSourceEntity` are **separate aggregates** with independent lifecycles ([ADR 0004](../../adr/0004-user-model-and-connected-sources.md)). DDD guidance: reference across aggregate boundaries by id, not by object association.
@@ -216,15 +246,22 @@ public interface ConnectedSourceRepository extends JpaRepository<ConnectedSource
     List<ConnectedSourceEntity> findByUserId(UUID userId);
     List<ConnectedSourceEntity> findByStatus(SourceStatus status);
 }
+
+public interface RefreshTokenRepository extends JpaRepository<RefreshTokenEntity, UUID> {
+    Optional<RefreshTokenEntity> findByTokenHash(byte[] tokenHash);
+    List<RefreshTokenEntity> findByFamilyId(UUID familyId);     // family revocation
+    List<RefreshTokenEntity> findByUserId(UUID userId);         // log out everywhere
+    long deleteByExpiresAtBefore(Instant cutoff);               // cleanup job
+}
 ```
 
 ## Services — where all logic lives
 
-Five services, by responsibility.
+Six services, by responsibility.
 
 ### LoginService — signup and login
 
-The IAM entry point for the **identity channel** (see "Three external channels" below). Runs once per login. It **never touches `connected_sources`**.
+The IAM entry point for the **identity channel** (see "Three external channels" below). Runs once per login, after `GoogleIdTokenVerifier` has verified the ID token presented to `POST /api/auth/google`. It **never touches `connected_sources`**. (In the current code this service is `OAuth2GoogleLoginCallbackService.handleLogin`, the name [ADR 0012](../../adr/0012-spa-mobile-stateless-api.md) uses; its behaviour is unchanged by that ADR.)
 
 ```java
 @Service
@@ -237,12 +274,12 @@ public class LoginService {
         //    not found  → create UserEntity + UserIdentityEntity,
         //                 publish UserRegisteredEvent,
         //                 return LoginResult(userId, true)
-        // 3. the AuthenticationSuccessHandler mints the JWT from the result
+        // 3. the auth controller then issues our access + refresh tokens from the result
     }
 }
 ```
 
-Compare this with what login used to do. It no longer acquires, encrypts or stores tokens; it has no `ACTIVE`/`REVOKED`/`ERROR` to reason about; it has no reconnect branch. All of that moved to `ConnectedSourceService`, reached through the connect flow — which is where a connection lifecycle belongs. A login is now exactly what its name says.
+Login never acquires, encrypts or stores provider tokens; it has no `ACTIVE`/`REVOKED`/`ERROR` to reason about and no reconnect branch. All of that belongs to `ConnectedSourceService`, reached through the connect flow, which is where a connection lifecycle belongs. A login is exactly what its name says.
 
 An unmatched `(provider, providerUserId)` **always** creates a new account. It is never matched against an existing user by email, and never merged — see the linking rules in [ADR 0011](../../adr/0011-identity-provider-signup.md).
 
@@ -250,13 +287,13 @@ An unmatched `(provider, providerUserId)` **always** creates a new account. It i
 
 The published events do **not** carry the login result back to the caller, and cannot:
 
-- **Different delivery semantics.** Events are `AFTER_COMMIT` + `@Async` — they run on another thread *after* the transaction commits, by which point the HTTP response is being written. A listener has no way to put a JWT into that response.
-- **Different audience.** The events tell *other* BCs to react. Login itself is a synchronous request/response inside IAM: the `AuthenticationSuccessHandler` needs the `user_id` **now**, in the same request, to mint `sub` and set the cookie.
+- **Different delivery semantics.** Events are `AFTER_COMMIT` + `@Async` — they run on another thread *after* the transaction commits, by which point the HTTP response is being written. A listener has no way to put a token into that response.
+- **Different audience.** The events tell *other* BCs to react. Login itself is a synchronous request/response inside IAM: the auth controller needs the `user_id` **now**, in the same request, to mint the access token's `sub` and start a refresh-token family.
 - **Self-consumption is a smell.** Per [events/conventions.md](../../events/conventions.md), a BC consuming its own events is a design smell; driving login off an IAM event would be exactly that.
 
 So: "publish and forget" applies to the cross-BC side effects, not to the primary result of the use case.
 
-The return type is a narrow `LoginResult` record, **not** the `UserEntity`. A JPA entity handed back across the transaction boundary is detached — any lazy access blows up, and it invites accidental serialization of persisted state into a response. `isNewUser` lets the handler branch without a second query, and that branch now matters more than it used to: a newly registered user has **no data at all**, so the handler sends them into the mandatory connect step rather than to an empty dashboard.
+The return type is a narrow `LoginResult` record, **not** the `UserEntity`. A JPA entity handed back across the transaction boundary is detached — any lazy access blows up, and it invites accidental serialization of persisted state into a response. `isNewUser` tells the caller whether this login was a signup without a second query. The onboarding branch itself — a newly registered user has **no data at all**, so they belong in the mandatory connect step rather than on an empty dashboard — is taken by the client, which routes to the connect step while `GET /api/me` returns an empty `sources` list (see [api.md](api.md)).
 
 ### UserIdentityService — sign-in methods
 
@@ -266,7 +303,7 @@ Owns the set of ways a given user can authenticate.
 @Service
 public class UserIdentityService {
     List<UserIdentityEntity> findByUserId(UUID userId);
-    UserIdentityEntity link(UUID userId, ProviderIdentityProfile identity);   // from settings, authenticated
+    UserIdentityEntity link(UUID userId, ProviderIdentityProfile identity);   // POST /api/me/identities/{provider}, authenticated
     void unlink(UUID userId, IdentityProvider provider);
 }
 ```
@@ -276,7 +313,7 @@ Two rules it enforces, both from [ADR 0011](../../adr/0011-identity-provider-sig
 - **`link` never steals.** If `(provider, providerUserId)` already belongs to a different `userId`, it fails with a conflict rather than re-pointing the row — answered as `409 …/errors/identity-already-linked` (see [api.md](api.md)).
 - **`unlink` never orphans.** Removing the last remaining sign-in method is rejected; `countByUserId` is the guard.
 
-Linking is always initiated by an **authenticated** user from settings. There is no matching by email and no login-time merge prompt.
+Linking is always initiated by an **authenticated** user from settings, presenting the new provider's ID token, which is verified by the same mechanism as login ([ADR 0012](../../adr/0012-spa-mobile-stateless-api.md) §5). There is no matching by email and no login-time merge prompt.
 
 ### UserService — identity CRUD
 
@@ -337,6 +374,30 @@ public class TokenManager {
 
 Refresh mechanics (per-user lock, lazy vs proactive, 401 handling) are detailed in [token-management.md](../../technical-notes/token-management.md). This BC doc fixes only the contract.
 
+### RefreshTokenService — our refresh-token lifecycle
+
+Owns the server-side half of our session tokens ([ADR 0013](../../adr/0013-access-and-refresh-tokens.md)): issuing, rotating and revoking refresh tokens. It is the only code that reads or writes `refresh_tokens`, and it is reached only from `POST /api/auth/google`, `/api/auth/refresh` and `/api/auth/logout` — **never** on an ordinary API request, which is authenticated by the access token's signature alone.
+
+```java
+@Service
+public class RefreshTokenService {
+    IssuedRefreshToken startFamily(UUID userId);         // login: new family, new token
+    RotationResult rotate(String presentedToken);        // refresh: validate, mark used, issue successor
+    void revokeFamily(String presentedToken);            // logout — idempotent
+    void revokeAllForUser(UUID userId);                  // log out everywhere
+    void deleteExpired();                                // scheduled cleanup
+}
+```
+
+The rules it enforces:
+
+- **Only hashes are persisted.** The opaque token (256 random bits, base64url) is returned to the caller once; the row stores its SHA-256.
+- **Rotation on every refresh.** The presented token must be unexpired (14-day idle expiry), unused, not revoked, and its family within the 30-day absolute lifetime. It is marked `usedAt = now`, and a successor with the **same `familyId`** is issued.
+- **Reuse revokes the family.** A token whose `usedAt` is already set means two parties hold it; every row in the family is revoked, and both must sign in again. A 10–30 s grace window keeps two tabs refreshing at the same instant from tripping this ([RFC 9700 §4.14](https://www.rfc-editor.org/rfc/rfc9700#section-4.14)).
+- **Logout is idempotent** and identifies the session by the refresh token, not by the access token, so it works after the access token has expired.
+
+The method names and result types above are illustrative; the exact signatures are fixed at implementation time. Minting the access token that accompanies each refresh is `AccessTokenIssuer`'s job, not this service's.
+
 ### UserContactReader — the contact-address port
 
 IAM's second published port, and the **only** way another BC obtains a user's contact address.
@@ -364,8 +425,12 @@ The gate check matters because `email` is nullable: without it, an addressless a
 
 ### Supporting collaborators
 
-- `StravaOAuthClient` — a thin HTTP wrapper over Strava's OAuth token endpoint (`POST /oauth/token`), used by the connect flow (code exchange) and by `TokenManager` (refresh). Lives in IAM.
-- `StravaApiClient` — used by the connect flow to read `GET /api/v3/athlete` and obtain the athlete id. This call is now **explicit**: `oauth2Client` does not invoke an `OAuth2UserService`, so nothing fetches the profile for us the way `oauth2Login` did.
+- `GoogleIdTokenVerifier` — verifies the Google ID token presented at login (and, later, at identity linking) with Spring Security components: `NimbusJwtDecoder.withIssuerLocation("https://accounts.google.com")` for the signature against Google's JWKS, `JwtValidators.createDefaultWithValidators(new OidcIdTokenValidator(googleRegistration))` for `exp`/`iat`, `iss`, `aud` and `azp`, a `JwtClaimValidator` for `email_verified`, and a `nonce` comparison when the client supplied one. It maps the claims onto a `ProviderIdentityProfile`. Deliberately **not** a `JwtDecoder` bean, so the resource server can never pick it up. See [api.md](api.md).
+- `AccessTokenIssuer` — mints our 15-minute RS256 access token with `JwtEncoder` (`sub` = `user_id`, `iss`, `aud` = `aperitivo-api`, `iat`, `exp`, `jti`). Called by the auth controller after login and after each refresh.
+- The `CurrentUser` converter — turns a validated access token into the `CurrentUser(userId)` principal for the resource server.
+- `RestClientAuthorizationCodeTokenResponseClient` (Spring Security) — exchanges the Strava authorization code presented to `POST /api/connect/strava`, using the existing `strava` `ClientRegistration`, so the `client_secret` never leaves the server.
+- `StravaOAuthClient` — a thin HTTP wrapper over Strava's OAuth token endpoint (`POST /oauth/token`), used by `TokenManager` for refresh. Lives in IAM.
+- `StravaApiClient` — used by the connect flow to read `GET /api/v3/athlete` and obtain the athlete id. This call is **explicit**: the code exchange yields tokens, and nothing fetches the profile for us.
 
 ## Three external channels — critical distinction
 
@@ -374,11 +439,11 @@ External systems reach us through **three independent channels**, owned by **dif
 ```mermaid
 flowchart LR
     subgraph Identity provider
-        GOOG[Google OIDC callback]
+        GOOG["Google ID token<br/>POST /api/auth/google"]
     end
 
     subgraph Strava
-        OAuth[OAuth connect callback]
+        OAuth["authorization code<br/>POST /api/connect/strava"]
         WH[Webhook POST]
     end
 
@@ -390,28 +455,33 @@ flowchart LR
     WC -- "deauth (authorized=false)" --> CSS[IAM: ConnectedSourceService.markRevoked]
 ```
 
-- **Identity channel** → IAM. Google's OIDC callback, from an **anonymous** caller. Creates or resolves a `User`. Handled by `LoginService.login`. Touches `users` and `user_identities` only.
-- **Connect channel** → IAM. Strava's OAuth callback, from an **already-authenticated** caller (the `user_id` comes from our JWT, not from the provider). Creates or reactivates a `ConnectedSource`. Handled by `ConnectedSourceService.connect`. Touches `connected_sources` only.
-- **Webhook channel** → Activity Ingestion's `WebhookController`. Continuous, Strava-initiated. Carries activity create/update/delete **and** deauthorization (`aspect_type=update, updates.authorized=false`). Deauth is routed back to IAM's `ConnectedSourceService.markRevoked`, but it arrives via the webhook channel, not either OAuth callback.
+- **Identity channel** → IAM. A Google ID token, obtained by the client (Google Identity Services on the web, the native SDK on mobile) and presented to `POST /api/auth/google` by an **anonymous** caller. Verified by `GoogleIdTokenVerifier`, then creates or resolves a `User` in `LoginService.login`. Touches `users` and `user_identities` only (plus a new `refresh_tokens` family when our tokens are issued).
+- **Connect channel** → IAM. A Strava authorization code, obtained by the SPA through a client-driven redirect (the SPA generates and verifies `state`) and presented to `POST /api/connect/strava` by an **already-authenticated** caller — the `user_id` comes from our access token, not from the provider. The backend exchanges the code server-side and calls `ConnectedSourceService.connect`, which creates or reactivates a `ConnectedSource`. Touches `connected_sources` only.
+- **Webhook channel** → Activity Ingestion's `WebhookController`. Continuous, Strava-initiated. Carries activity create/update/delete **and** deauthorization (`aspect_type=update, updates.authorized=false`). Deauth is routed back to IAM's `ConnectedSourceService.markRevoked`, but it arrives via the webhook channel, not through either client-facing endpoint.
 
-The first two are both browser OAuth redirects and superficially look alike. They are not: they use different Spring Security machinery (`oauth2Login` vs `oauth2Client`), start from different authentication states, and write to different tables. See [api.md](api.md).
+The first two both start in the client and end with the client calling our API, and superficially look alike. They are not: one is an OIDC ID-token exchange, the other an OAuth 2.0 authorization-code exchange with a confidential client; they start from different authentication states and write to different tables. Neither uses a backend OAuth redirect ([ADR 0012](../../adr/0012-spa-mobile-stateless-api.md)). See [api.md](api.md).
 
 ## Identity tokens — the `sub` claim
 
-The JWT we issue carries our **internal `user_id` (UUID)** as `sub`. Never `providerUserId`.
+The access token we issue carries our **internal `user_id` (UUID)** as `sub`. Never `providerUserId`.
 
 ```
-JWT claims:
+Access token (RS256 JWT, 15 min) claims:
   sub = user_id (UUID)          ← our stable internal identity
   iss = https://aperitivo.<…>   ← issuer (us)
-  iat, exp (24–72h), jti
+  aud = aperitivo-api
+  iat, exp (iat + 15 min), jti
 ```
+
+Nothing else goes into it — no email, name or connected sources: a JWT is signed, not encrypted, its claims are frozen until `exp`, and it travels with every request. Profile data comes from `GET /api/me`. Staying signed in beyond 15 minutes is the job of the separate, opaque refresh token (`RefreshTokenService` above), which carries no claims at all. See [ADR 0013](../../adr/0013-access-and-refresh-tokens.md).
+
+A **Google ID token is never accepted as an access token** on the API: its `sub` is Google's identifier, its lifetime is Google's, and we can neither revoke it nor add claims to it. It proves identity once, at login ([ADR 0012](../../adr/0012-spa-mobile-stateless-api.md)).
 
 **Two different things are called `sub`, and they must never be conflated:**
 
 | | Meaning | Where it lives |
 |---|---|---|
-| Our JWT `sub` | the internal `user_id` (UUID) | minted by us; the FK target across all six BCs |
+| Our access token's `sub` | the internal `user_id` (UUID) | minted by us; the FK target across all six BCs |
 | Google's `sub` | Google's subject identifier | stored as `UserIdentityEntity.providerUserId` |
 
 Why our `sub` must be `user_id`:
@@ -419,9 +489,9 @@ Why our `sub` must be `user_id`:
 - A provider's `sub` is an attribute of *one sign-in method*. A user with both Google and Apple has two of them — there is no single value to put in `sub`.
 - `providerUserId` on a `ConnectedSource` is even less suitable: it identifies a *data source*, which the user may disconnect entirely without ceasing to exist.
 
-No provider identifier ever enters the JWT. The Strava athlete id is needed only by Activity Ingestion when talking to Strava, and is read from `ConnectedSourceEntity`.
+No provider identifier ever enters the access token. The Strava athlete id is needed only by Activity Ingestion when talking to Strava, and is read from `ConnectedSourceEntity`.
 
-JWT issuance/validation mechanics (RS256 keys, JWKS, `jti` blacklist) are covered in [jwt-and-keys.md](../../technical-notes/jwt-and-keys.md).
+Issuance/validation mechanics (RS256 keys, JWKS, lifetimes) are covered in [jwt-and-keys.md](../../technical-notes/jwt-and-keys.md).
 
 ## Events published
 
@@ -433,13 +503,13 @@ All via `ApplicationEventPublisher`, consumed after commit (`@TransactionalEvent
 | `IntegrationConnectedEvent` | `ConnectedSourceService` | a `ConnectedSourceEntity` transitions to `ACTIVE` (connect or reconnect) |
 | `IntegrationRevokedEvent` | `ConnectedSourceService` | a source transitions `ACTIVE → REVOKED` |
 
-**These two no longer coincide.** Under the previous model both fired from the same login transaction, so "a user exists" and "a data source exists" were the same moment. They are now separated by an arbitrary interval — signup, then whenever the user completes the connect step, possibly never. Consumers must not assume that a `UserRegisteredEvent` implies any source, and `IntegrationConnectedEvent` is the **sole** trigger for ingestion backfill. See [ADR 0011](../../adr/0011-identity-provider-signup.md).
+**These two never coincide.** "A user exists" and "a data source exists" are separate facts, separated by an arbitrary interval — signup, then whenever the user completes the connect step, possibly never. Consumers must not assume that a `UserRegisteredEvent` implies any source, and `IntegrationConnectedEvent` is the **sole** trigger for ingestion backfill. See [ADR 0011](../../adr/0011-identity-provider-signup.md).
 
 Payload schemas: see [events.md](events.md).
 
 ## Events consumed
 
-None from inside the system. External inputs are the Google OIDC callback and the Strava connect callback (both handled here) and the Strava deauthorization webhook (handled in Ingestion, routed back to `ConnectedSourceService`).
+None from inside the system. External inputs are the Google ID token presented at login and the Strava authorization code presented at connect (both handled here) and the Strava deauthorization webhook (handled in Ingestion, routed back to `ConnectedSourceService`).
 
 ## Invariants
 
@@ -454,28 +524,33 @@ Enforced by services and the schema, not by entity behavior.
 7. **Tokens never leave `TokenManager` in plaintext** except at the moment of a Strava API call. No other component decrypts them. Identity providers contribute no tokens at all.
 8. **Concurrent refresh is serialized per user.** Guarded by `@Version` optimistic locking plus the per-user lock described in the token-management note.
 9. **The contact address leaves IAM only through `UserContactReader`.** It is never placed on an event payload (which Modulith would persist into `event_publication`) and never copied into another BC's schema, so `users.email` stays the one row account erasure has to reach.
+10. **A connected source's `userId` comes only from our access token.** The connect endpoint reads it from `CurrentUser`; the provider contributes the athlete id and the tokens, nothing else ([ADR 0011](../../adr/0011-identity-provider-signup.md), unchanged by [ADR 0012](../../adr/0012-spa-mobile-stateless-api.md)).
+11. **Refresh tokens are persisted only as SHA-256 hashes, and presenting a used one revokes its whole family** (outside the short grace window). Enforced by `RefreshTokenService` ([ADR 0013](../../adr/0013-access-and-refresh-tokens.md)).
 
 ## Collaboration summary
 
 ```
+Auth controller        → GoogleIdTokenVerifier, LoginService, AccessTokenIssuer, RefreshTokenService
 LoginService           → UserService, UserIdentityRepository, (publishes UserRegisteredEvent)
 UserIdentityService    → UserIdentityRepository
 ConnectedSourceService → ConnectedSourceRepository, (publishes Integration* events)
 UserService            → UserRepository
+RefreshTokenService    → RefreshTokenRepository
 TokenManager           → ConnectedSourceRepository, StravaOAuthClient
 UserContactReader      → UserRepository (read-only)
-Connect flow           → StravaOAuthClient, StravaApiClient, ConnectedSourceService
+Connect flow           → RestClientAuthorizationCodeTokenResponseClient, StravaApiClient, ConnectedSourceService
 Activity Ingestion (other BC) → TokenManager.getValidAccessToken() ONLY
 Notifications (other BC)      → UserContactReader.emailFor() ONLY
+Every BC's controllers        → CurrentUser (the authenticated principal) ONLY
 ```
 
 `TokenManager` and `ConnectedSourceService` are kept separate on purpose: `TokenManager` is a narrow, stable contract exposed to another BC (Ingestion) for hot-path token access; `ConnectedSourceService` is IAM-internal lifecycle management. Different audiences, different cadence of change. `UserContactReader` follows the same split against `UserService`, for the same reason.
 
 ## Next documents in this BC
 
-- [database.md](database.md) — DDL, indexes, migrations
+- [database.md](database.md) — DDL, indexes, migrations (including `refresh_tokens`)
 - [events.md](events.md) — event payload schemas
-- [api.md](api.md) — REST endpoints (login, connect, current user, sources, identities)
+- [api.md](api.md) — REST endpoints (login, refresh, logout, connect, current user, sources, identities) and the security chain
 - Sequence diagrams: [google-login.md](diagrams/sequence/google-login.md), [strava-connect.md](diagrams/sequence/strava-connect.md)
 - [token-management.md](../../technical-notes/token-management.md) — already written
 

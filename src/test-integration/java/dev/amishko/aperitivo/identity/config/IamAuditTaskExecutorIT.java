@@ -1,6 +1,7 @@
 package dev.amishko.aperitivo.identity.config;
 
 import dev.amishko.aperitivo.config.BaseIT;
+import dev.amishko.aperitivo.identity.config.properties.AuditExecutorProperties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

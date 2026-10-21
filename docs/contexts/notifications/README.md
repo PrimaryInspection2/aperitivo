@@ -39,7 +39,7 @@ This BC is the natural home for the **SSE endpoint** (in-app real-time push) —
 - One long-lived `GET /api/sse/events` connection per authenticated client (JWT-authenticated).
 - An in-memory `Map<UserId, List<SseEmitter>>` holds active connections (single-instance MVP).
 - On a relevant event, the matching user's emitters receive the message.
-- On disconnect, the emitter is evicted; the browser's `EventSource` reconnects with `Last-Event-ID`.
+- On disconnect, the emitter is evicted; the client's fetch-based SSE client reconnects with `Last-Event-ID` (bearer-authenticated, so not the native `EventSource` — see [ADR 0012](../../adr/0012-spa-mobile-stateless-api.md)).
 - Missed messages while disconnected are recovered from the in-app inbox (not a replayed stream).
 - Behind nginx, the SSE response sets `X-Accel-Buffering: no` to disable buffering.
 - Multi-instance scaling (sticky sessions or Redis pub/sub fan-out) is deferred — see the SSE streaming technical note.

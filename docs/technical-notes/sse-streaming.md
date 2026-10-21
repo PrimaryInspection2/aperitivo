@@ -37,7 +37,8 @@ The `id` set on each message is what the browser echoes back as `Last-Event-ID` 
 
 ## Reconnection and missed messages
 
-- The browser `EventSource` reconnects automatically and sends `Last-Event-ID`.
+- **Client:** the stream needs `Authorization: Bearer`, which the native `EventSource` cannot send, so clients use a fetch-based SSE client (e.g. `@microsoft/fetch-event-source`). It reconnects with backoff and sends `Last-Event-ID`; before reconnecting the client refreshes its access token if it has expired ([ADR 0012](../adr/0012-spa-mobile-stateless-api.md), [ADR 0013](../adr/0013-access-and-refresh-tokens.md)).
+- The token is checked once, at connect time; an access token expiring while the stream is open does not close it.
 - MVP does **not** replay a precise event stream. Instead, unread notifications are persisted as an **in-app inbox**; on (re)connect the client fetches unread items via a normal REST call and then receives live updates over SSE. This keeps the streaming path stateless and simple while guaranteeing no user-visible loss.
 
 ## Proxy / infrastructure notes

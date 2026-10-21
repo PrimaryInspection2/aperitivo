@@ -1,5 +1,6 @@
 package dev.amishko.aperitivo.identity.config;
 
+import dev.amishko.aperitivo.identity.config.properties.AuditExecutorProperties;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

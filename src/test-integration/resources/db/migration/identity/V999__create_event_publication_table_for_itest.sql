@@ -5,7 +5,8 @@
 -- that migration and identity/V1 can both legitimately be numbered V1. In the
 -- IT context we run Boot's single Flyway instance against the identity
 -- location only (to avoid a duplicate-V1 collision), and instead materialise
--- the outbox table here as V4 — the next free slot after V3.
+-- the outbox table here as V999 — a version production migrations never reach,
+-- so the next production V5/V6 cannot collide with it (V4 once did).
 --
 -- If you change db/migration/__root/V1__create_event_publication_table.sql,
 -- mirror the DDL here or the itest context will fail with:

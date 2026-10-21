@@ -16,6 +16,8 @@ application-secrets.yml
 application-secrets.yaml
 
 ### Keys and certs (never commit) ###
+/keys/
+*.crt
 *.pem
 *.p12
 *.pfx

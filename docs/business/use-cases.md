@@ -10,25 +10,24 @@ Format: each use case has a **trigger**, **actors**, **flow**, and **success cri
 
 **Trigger:** New user visits Aperitivo and clicks "Sign in with Google".
 
-**Actors:** User, Aperitivo backend, Google (identity provider).
+**Actors:** User, Aperitivo client (SPA; later the mobile app), Aperitivo backend, Google (identity provider).
 
 **Flow:**
-1. User clicks "Sign in with Google".
-2. Aperitivo (Spring Security `oauth2Login`) redirects to Google's OIDC authorize URL with our `client_id`, scopes `openid email profile`, a `state` and a `nonce`.
-3. User authenticates and consents on Google.
-4. Google redirects back with an authorization code.
-5. Aperitivo exchanges the code for an ID token and validates it (signature against Google's JWKS, `iss`, `aud`, `nonce`, `exp`).
-6. Aperitivo looks up a `UserIdentity` by `(GOOGLE, sub)`. None exists, so it creates an internal `User` (UUID) and a `UserIdentity`.
-7. Aperitivo issues its own JWT for the internal user (`JwtEncoder`, RS256) and sets it as an HttpOnly cookie.
-8. User lands on the **connect-a-source** step, because the account is empty.
+1. User clicks "Sign in with Google" in the client.
+2. The client (Google Identity Services on the web, the native SDK on mobile) signs the user in with Google; the user authenticates and consents on Google.
+3. The client receives a Google **ID token** and sends it to Aperitivo: `POST /api/auth/google { idToken }`.
+4. Aperitivo verifies the ID token (signature against Google's JWKS, `iss`, `aud`, `azp`, `exp`, `email_verified`, and `nonce` when supplied). The Google token is discarded afterwards.
+5. Aperitivo looks up a `UserIdentity` by `(GOOGLE, sub)`. None exists, so it creates an internal `User` (UUID) and a `UserIdentity`.
+6. Aperitivo issues its own tokens for the internal user: a 15-minute **access token** (JWT, RS256) in the response body, which the client keeps in memory, and a **refresh token** in an HttpOnly cookie.
+7. User lands on the **connect-a-source** step, because the account is empty.
 
 **Events emitted:** `UserRegistered`.
 
 **BCs involved:** Identity & Access only.
 
-**Success criteria:** User holds a valid JWT and sees a prompt to connect a data source.
+**Success criteria:** User holds a valid access token and refresh token and sees a prompt to connect a data source.
 
-**Explicitly not part of this use case:** no Strava call, no tokens, no `ConnectedSource`, and **no backfill**. A freshly signed-up account holds no training data at all. Ingestion begins in UC-1b. See [ADR 0011](../adr/0011-identity-provider-signup.md).
+**Explicitly not part of this use case:** no Strava call, no Strava tokens, no `ConnectedSource`, and **no backfill**. A freshly signed-up account holds no training data at all. Ingestion begins in UC-1b. See [ADR 0011](../adr/0011-identity-provider-signup.md); the login mechanism and the tokens are defined in [ADR 0012](../adr/0012-spa-mobile-stateless-api.md) and [ADR 0013](../adr/0013-access-and-refresh-tokens.md).
 
 ---
 
@@ -36,17 +35,18 @@ Format: each use case has a **trigger**, **actors**, **flow**, and **success cri
 
 **Trigger:** An **authenticated** user clicks "Connect Strava" — immediately after signing up, or any time later.
 
-**Actors:** User (logged in), Aperitivo backend, Strava OAuth.
+**Actors:** User (logged in), Aperitivo client (SPA), Aperitivo backend, Strava OAuth.
 
 **Flow:**
-1. User clicks "Connect Strava". The request carries their Aperitivo JWT; an anonymous request is rejected here.
-2. Aperitivo (Spring Security `oauth2Client`) redirects to Strava's OAuth authorize URL with our `client_id` and scopes `read,activity:read_all,profile:read_all`.
+1. User clicks "Connect Strava" in the client.
+2. The client generates a `state`, remembers it, and sends the browser to Strava's OAuth authorize URL with our `client_id`, scopes `read,activity:read_all,profile:read_all` and the client's own callback route as `redirect_uri`.
 3. User authorizes Aperitivo on Strava.
-4. Strava redirects back to `/connect/oauth2/code/strava` with an authorization code.
-5. Aperitivo exchanges the code for access + refresh tokens. **The security context is untouched** — this flow cannot log anyone in.
-6. Aperitivo calls `GET /api/v3/athlete` explicitly to obtain the athlete id (`oauth2Client` invokes no `OAuth2UserService`).
-7. Aperitivo creates — or reactivates, if a revoked row exists for that athlete — a `ConnectedSource` with AES-GCM-encrypted tokens, status `ACTIVE`. The `user_id` comes from the JWT, never from Strava.
-8. **Asynchronously:** Activity Ingestion starts the initial backfill of the user's activity history.
+4. Strava redirects back to the client's callback route with an authorization code. The client checks `state` (a mismatch is rejected and nothing is sent) and removes the code from the URL.
+5. The client sends the code to Aperitivo: `POST /api/connect/strava { code, scope }` with its access token. An anonymous request is rejected here.
+6. Aperitivo exchanges the code for Strava access + refresh tokens server-side, with the `client_secret` that never leaves the backend. Nobody is logged in or out by this — the caller stays who their access token says.
+7. Aperitivo checks that `activity:read_all` was granted (otherwise the connect is rejected with `400` and nothing is linked) and calls `GET /api/v3/athlete` explicitly to obtain the athlete id.
+8. Aperitivo creates — or reactivates, if a revoked row exists for that athlete — a `ConnectedSource` with AES-GCM-encrypted tokens, status `ACTIVE`. The `user_id` comes from our access token, never from Strava.
+9. **Asynchronously:** Activity Ingestion starts the initial backfill of the user's activity history.
 
 **Events emitted:** `IntegrationConnected`.
 
@@ -54,7 +54,7 @@ Format: each use case has a **trigger**, **actors**, **flow**, and **success cri
 
 **Success criteria:** User has a `ConnectedSource` with `ACTIVE` status and sees a "we're syncing your history" UI state.
 
-**Notes:** If the athlete is already connected to a different Aperitivo account, the connect is rejected with `409` and nothing is moved. A user may go through this flow more than once over the account's life (reconnect after revoke); each transition to `ACTIVE` re-emits `IntegrationConnected`.
+**Notes:** If the athlete is already connected to a different Aperitivo account, the connect is rejected with `409` and nothing is moved. If the user denies consent on Strava, the client's callback page shows the error and nothing is sent to the backend. A user may go through this flow more than once over the account's life (reconnect after revoke); each transition to `ACTIVE` re-emits `IntegrationConnected`. The flow is client-driven per [ADR 0012](../adr/0012-spa-mobile-stateless-api.md); Strava specifics are in [oauth-flow.md](../integrations/strava/oauth-flow.md).
 
 ---
 
@@ -62,11 +62,13 @@ Format: each use case has a **trigger**, **actors**, **flow**, and **success cri
 
 **Trigger:** Existing user clicks "Sign in with Google".
 
-**Flow:** Same as UC-1 through step 5. At step 6 the `UserIdentity` is found, so nothing is created and **no event is emitted**; `lastLoginAt` is touched. The user receives a fresh JWT and lands on the app home rather than the connect step.
+**Flow:** Same as UC-1 through step 4. At step 5 the `UserIdentity` is found, so nothing is created and **no event is emitted**; `lastLoginAt` is touched. The user receives a fresh access token and refresh token and lands on the app home rather than the connect step.
 
 **BCs involved:** Identity & Access.
 
-**Notes:** Logging in is independent of source health. A user whose Strava connection is revoked still logs in normally — they are simply shown a "reconnect Strava" prompt. Under the previous Strava-login model these two failures were the same event; they are now unrelated.
+**Staying signed in:** a user does not repeat this use case every time the 15-minute access token expires or the page reloads. The client silently calls `POST /api/auth/refresh` with the refresh cookie and gets a new access token (and a rotated refresh token). The user goes back to Google only after a long period of inactivity, when the sign-in reaches its absolute lifetime, after logging out, or when a reused refresh token has revoked the sign-in. Logging out (`POST /api/auth/logout`) ends the current sign-in. See [ADR 0013](../adr/0013-access-and-refresh-tokens.md).
+
+**Notes:** Logging in is independent of source health. A user whose Strava connection is revoked still logs in normally — they are simply shown a "reconnect Strava" prompt.
 
 
 ---
@@ -197,5 +199,5 @@ This table cross-references use cases to the BCs and events they exercise, used 
 
 ★ = primary owner   ○ = participates asynchronously
 
-Note that UC-1 now touches **only** IAM: signing up starts no ingestion, because there is nothing to ingest yet. Ingestion enters at UC-1b, when a source is actually connected.
+Note that UC-1 touches **only** IAM: signing up starts no ingestion, because there is nothing to ingest yet. Ingestion enters at UC-1b, when a source is actually connected.
 

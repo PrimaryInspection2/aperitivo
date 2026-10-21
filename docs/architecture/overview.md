@@ -20,7 +20,7 @@ This is a pet project intended to demonstrate **staff-level engineering**. It is
 - Event-driven architecture in a modular monolith (Spring Modulith, in-process events)
 - Reliable integration with an external API that has rate limits, webhooks, and revocable OAuth tokens
 - Time-series analytics with TimescaleDB
-- OIDC identity-provider login (Google) and self-issued JWT identity with Spring Security
+- OIDC identity-provider login (Google ID-token exchange) and self-issued JWT identity (15-minute access + rotating refresh) with Spring Security
 - Full-stack observability with the OpenTelemetry stack
 - Bounded Context decomposition with explicit, documented rationale
 
@@ -28,11 +28,11 @@ This is a pet project intended to demonstrate **staff-level engineering**. It is
 
 Explicitly **out of scope**, even though they would be reasonable features for an "athlete platform":
 
-- **Realtime live-streaming of in-progress workouts.** Strava webhooks fire post-activity only — there is no public API for live HR/pace/GPS streams. We do not attempt to fake this. See [ADR 0001](../adr/0001-no-strava-live-streaming.md).
-- **Social features: friend graph, public challenges, leaderboards, comments, likes.** Strava already does these well. Competing on social is out of scope. See [ADR 0006](../adr/0006-no-social-challenges.md).
+- **Realtime live-streaming of in-progress workouts.** Strava webhooks fire post-activity only — there is no public API for live HR/pace/GPS streams. We do not attempt to fake this.
+- **Social features: friend graph, public challenges, leaderboards, comments, likes.** Strava already does these well. Competing on social is out of scope.
 - **Multi-source data ingestion (Garmin, Wahoo, COROS) in MVP.** The architecture is designed to allow this later without painful migration, but MVP ships Strava-only.
 - **Alternative identity providers beyond Google (Apple, email) in MVP.** Login is Google OIDC only; the model supports adding Apple/email later. Strava is **not** a login provider — it is a data source connected from inside the app after signup ([ADR 0011](../adr/0011-identity-provider-signup.md)).
-- **Mobile or web frontend.** This is a **backend** project. Any UI demos are minimal and exist only to exercise APIs.
+- **A polished frontend or a mobile app in MVP.** The backend is the focus. The web client is a React SPA consuming the API from the same origin, and a mobile app is a later client of the same API. Both are designed for, but their UI polish is not a goal. Until the SPA exists, the API is exercised with HTTP clients ([ADR 0012](../adr/0012-spa-mobile-stateless-api.md)).
 
 ## Architectural style
 
@@ -52,20 +52,21 @@ See [Bounded Contexts](bounded-contexts.md) for the full decomposition.
 | Framework | Spring Boot 4, Spring Modulith | Modular monolith with enforced boundaries and in-process events |
 | Persistence | PostgreSQL + TimescaleDB extension | Single OLTP DB for most BCs; TimescaleDB hypertables for time-series metrics in Analytics |
 | Inter-BC events | Spring Modulith application events (`event_publication` table) | Durable, transactional, in-process; no broker. Kafka-ready design, externalized later if needed |
-| Cache / locks | Redis | Hot data, rate-limit counters, distributed locks, optional `jti` blacklist |
-| Identity | Spring Security 6 (OAuth2 client + self-issued JWT, RS256) | Google OIDC login; we mint our own OIDC-style JWT. Strava is a connected data source, not a login provider ([ADR 0011](../adr/0011-identity-provider-signup.md)). No external identity server |
+| Cache / locks | Redis | Hot data, rate-limit counters, distributed locks |
+| Identity | Spring Security 7 (resource server + self-issued JWT, RS256) | The client obtains a Google ID token; the backend verifies it and mints a 15-minute access JWT plus a rotating refresh token ([ADR 0012](../adr/0012-spa-mobile-stateless-api.md), [ADR 0013](../adr/0013-access-and-refresh-tokens.md)). One stateless security chain, no session. Strava is a connected data source, not a login provider ([ADR 0011](../adr/0011-identity-provider-signup.md)). No external identity server |
 | Observability | OpenTelemetry, Prometheus, Grafana, Loki, Tempo | Traces, metrics, logs unified |
 | API | REST (Spring MVC), SSE for server push | No GraphQL, no WebSocket |
-| Frontend (demo) | Thymeleaf + HTMX | Minimal UI to exercise APIs; backend is the focus |
+| Frontend | React SPA, same origin behind a reverse proxy (`/` → SPA, `/api` → Spring) | Bearer-token client of the API; no CORS. Mobile later on the same API ([ADR 0012](../adr/0012-spa-mobile-stateless-api.md)) |
 | Build | Maven (multi-module) | One module per BC |
 | Containers | Docker Compose for local dev | No Kubernetes for MVP |
 
-See [ADR 0007](../adr/0007-sse-not-websocket.md) for SSE-over-WebSocket rationale, [ADR 0008](../adr/0008-event-transport.md) for the no-Kafka decision, and [ADR 0009](../adr/0009-identity-spring-security.md) for the Spring Security identity decision.
+See [ADR 0007](../adr/0007-sse-not-websocket.md) for SSE-over-WebSocket rationale, [ADR 0008](../adr/0008-event-transport.md) for the no-Kafka decision, [ADR 0009](../adr/0009-identity-spring-security.md) for the Spring Security identity decision, and [ADR 0012](../adr/0012-spa-mobile-stateless-api.md) / [ADR 0013](../adr/0013-access-and-refresh-tokens.md) for the client topology and token lifecycle.
 
 ## Deployment model
 
 - **Local development:** Docker Compose. A single `docker-compose.yml` brings up the application + Postgres+TimescaleDB + Redis + the OTel collector + Grafana stack.
 - **Production:** A VPS deployment is the initial target (invite-only launch). The architecture is 12-factor / K8s-ready (externalized config and state) but Kubernetes is not used for the MVP.
+- **Single origin:** a reverse proxy serves the SPA at `/` and routes `/api/**` to the application, so the browser sees one origin: no CORS, and the refresh cookie can be `SameSite=Strict` ([ADR 0012](../adr/0012-spa-mobile-stateless-api.md)). In development a Vite proxy reproduces the same layout. The application holds no HTTP session, so instances scale horizontally without sticky routing.
 
 ## Key constraints
 

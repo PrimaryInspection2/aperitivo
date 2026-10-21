@@ -15,6 +15,8 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+
 @Service
 @Slf4j
 @RequiredArgsConstructor
@@ -31,7 +33,10 @@ public class OAuth2GoogleLoginCallbackService {
     @Transactional
     public LoginResult handleLogin(ProviderIdentityProfile profile) {
         return userIdentityRepository.findByProviderAndProviderUserId(profile.provider(), profile.providerUserId())
-                .map(userIdentity -> new LoginResult(userIdentity.getUserId(), false))
+                .map(userIdentity -> {
+                    userIdentity.setLastLoginAt(Instant.now());
+                    return new LoginResult(userIdentity.getUserId(), false);
+                })
                 .orElseGet(() -> register(profile));
     }
 

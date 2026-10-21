@@ -7,7 +7,7 @@ spring:
       flyway-enabled: false
   flyway:
     # Boot's Flyway runs a single instance against classpath:db/migration/identity.
-    # Under this location we ship a test-only V4 mirror of __root/V1 so the
+    # Under this location we ship a test-only V999 mirror of __root/V1 so the
     # Modulith event_publication outbox table exists — required as soon as
     # anything subscribes to @TransactionalEventListener(AFTER_COMMIT), which
     # RecordedEvents does.

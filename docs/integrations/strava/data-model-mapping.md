@@ -137,7 +137,7 @@ mapping is documented as a translation table, not embedded logic: it can be re-d
 
 Strava sends much more than we keep. Explicitly **not** mapped in MVP:
 - `kudos_count`, `comment_count`, `athlete_count`, `photo_count` — social signals, out of scope
-  ([ADR 0006](../../adr/0006-no-social-challenges.md)).
+  ([overview — non-goals](../../architecture/overview.md#non-goals)).
 - `gear_id` / equipment — not modeled in MVP.
 - `device_name`, `embed_token`, `upload_id` — Strava-internal plumbing.
 - `splits_metric` / `splits_standard` — we use `laps` as the canonical sub-segment; Strava's

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-05-20
-- **Reviewed:** 2026-06-14 (context rewritten; decision unchanged)
+- **Revised:** 2026-10-19 — client-side SSE consumption aligned with [ADR 0012](0012-spa-mobile-stateless-api.md) (bearer-authenticated stream, fetch-based client)
 
 ## Context
 
@@ -16,7 +16,7 @@ Aperitivo needs server-to-client push for a small set of use cases. Enumerated a
 
 Reviewing every one of these: **all are one-directional (server → client), and none is latency-critical** (seconds-to-minutes tolerance everywhere). There is no use case — in MVP, Phase 2, or Phase 3 — that requires the client to push messages back to the server over a persistent connection. In other words, **no bidirectional channel is needed.**
 
-(Note: an earlier draft of the stack carried WebSocket on the assumption of live challenge leaderboards. Social features and public challenges were subsequently ruled out — see [ADR 0006](0006-no-social-challenges.md) — and live-streaming was ruled out in [ADR 0001](0001-no-strava-live-streaming.md). This ADR no longer rests on that history: the decision below stands on the use-case analysis above, independent of the removed features.)
+The features that would need low-latency or bidirectional traffic — live workout streaming and social challenges with live leaderboards — are non-goals ([overview](../architecture/overview.md#non-goals)).
 
 ## Decision
 
@@ -24,18 +24,20 @@ Use **Server-Sent Events (SSE)** for all server-to-client push. WebSocket is not
 
 Each authenticated client opens one long-lived SSE connection. The Notifications BC fans events into per-user SSE channels held in an in-memory `Map<UserId, List<SseEmitter>>` (single-instance MVP). Missed events while disconnected are recovered from the in-app inbox, not from a replayed stream.
 
+The stream is an ordinary API endpoint authenticated with `Authorization: Bearer` ([ADR 0012](0012-spa-mobile-stateless-api.md)). The browser's native `EventSource` cannot set request headers, so clients consume the stream with a fetch-based SSE client (e.g. `@microsoft/fetch-event-source`), which implements reconnection with `Last-Event-ID` and lets the client refresh its access token before reconnecting. The token is checked once, at connect time.
+
 ## Alternatives considered
 
 - **WebSocket.** Full-duplex, more flexible, more complex (framing protocol, upgrade handshake, heartbeats, manual reconnection/backpressure). Rejected: we have no bidirectional traffic in any phase. Adding it for a unidirectional push problem is over-engineering and would read as such to a reviewer.
 - **Polling.** Client polls `GET /notifications/recent` every N seconds. Rejected: worse latency, load proportional to users × frequency, and a DB query on every poll even when nothing changed.
-- **Long polling.** A halfway house (parked requests via `DeferredResult`). Rejected: SSE solves the same problem with native browser support and built-in reconnection, at lower complexity.
+- **Long polling.** A halfway house (parked requests via `DeferredResult`). Rejected: SSE solves the same problem with a standard protocol and built-in reconnection, at lower complexity.
 - **Push via webhooks to a client-owned URL.** Not applicable — Aperitivo's clients are end-user browsers/apps, not backend systems.
 
 ## Consequences
 
 **Positive:**
 - Simpler than WebSocket: SSE is plain HTTP with `Content-Type: text/event-stream`. No framing protocol, no upgrade handshake, no extra library.
-- Built-in reconnection with the `Last-Event-ID` header; native browser `EventSource` API.
+- Reconnection with the `Last-Event-ID` header is part of the protocol (implemented by the fetch-based SSE client).
 - Works through HTTP-aware proxies. Spring MVC supports it natively via `SseEmitter`.
 - Aligns cleanly with the chosen in-process architecture (Spring Modulith local events, single instance) — the emitter map lives in-process with no extra infrastructure. See [ADR 0008](0008-event-transport.md).
 
@@ -52,7 +54,7 @@ Each authenticated client opens one long-lived SSE connection. The Notifications
 
 ## References
 
-- [ADR 0001: No Strava live-streaming](0001-no-strava-live-streaming.md)
-- [ADR 0006: No social/challenges](0006-no-social-challenges.md)
+- [ADR 0012: SPA and mobile clients; stateless API with ID-token login](0012-spa-mobile-stateless-api.md)
+- [Architecture overview — non-goals](../architecture/overview.md#non-goals)
 - [ADR 0008: Event transport](0008-event-transport.md)
 - [HTML Living Standard — Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html)

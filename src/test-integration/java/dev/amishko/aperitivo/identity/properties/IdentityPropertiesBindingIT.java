@@ -1,7 +1,7 @@
 package dev.amishko.aperitivo.identity.properties;
 
 import dev.amishko.aperitivo.config.BaseIT;
-import dev.amishko.aperitivo.identity.config.AuditExecutorProperties;
+import dev.amishko.aperitivo.identity.config.properties.AuditExecutorProperties;
 import dev.amishko.aperitivo.identity.util.cipher.EncryptionProperties;
 import dev.amishko.aperitivo.identity.util.lock.TokenRefreshLockProperties;
 import org.junit.jupiter.api.DisplayName;

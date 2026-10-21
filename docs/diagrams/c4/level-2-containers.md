@@ -25,12 +25,12 @@ flowchart TB
     Strava["🏃 Strava (external data source)"]
 
     subgraph Host["Single VPS / Docker Compose"]
-        NGINX["<b>nginx</b><br/><i>reverse proxy</i><br/>TLS termination, SSE buffering off"]
+        NGINX["<b>nginx</b><br/><i>reverse proxy</i><br/>TLS termination, single origin:<br/>/ → SPA files, /api → app; SSE buffering off"]
 
         APP["<b>Aperitivo App</b><br/><i>Spring Boot 4 modular monolith (Java 25)</i><br/>6 Bounded Contexts, in-process events<br/>REST API + SSE + webhook receiver"]
 
         PG["<b>PostgreSQL + TimescaleDB</b><br/><i>relational + time-series</i><br/>per-BC schemas; activity_samples hypertable;<br/>event_publication outbox"]
-        REDIS["<b>Redis</b><br/><i>cache / counters / locks</i><br/>rate-limit counters, jti denylist,<br/>per-user refresh locks"]
+        REDIS["<b>Redis</b><br/><i>cache / counters / locks</i><br/>rate-limit counters,<br/>per-user refresh locks"]
 
         subgraph OBS["Observability stack"]
             OTEL["OTel Collector"]
@@ -41,11 +41,16 @@ flowchart TB
         end
     end
 
-    Athlete -->|HTTPS| NGINX
+    SPA["<b>Web SPA</b><br/><i>React, runs in the browser</i><br/>Google sign-in button, Strava consent redirect,<br/>bearer calls to /api, fetch-based SSE"]
+
+    Athlete -->|uses| SPA
+    SPA -->|"HTTPS (same origin)"| NGINX
+    SPA -->|"sign-in → ID token"| Google
+    SPA -->|"consent redirect"| Strava
     Strava -->|webhooks HTTPS| NGINX
     NGINX --> APP
-    APP -->|"OIDC login"| Google
-    APP -->|OAuth/REST| Strava
+    APP -->|"JWKS (verify ID token)"| Google
+    APP -->|"code exchange, REST, refresh"| Strava
     APP -->|JDBC| PG
     APP -->|RESP| REDIS
     APP -->|OTLP| OTEL
@@ -59,10 +64,11 @@ flowchart TB
 
 | Container | Tech | Responsibility |
 |---|---|---|
-| **nginx** | reverse proxy | TLS termination; SSE buffering off (`X-Accel-Buffering: no`); fronts the webhook callback |
+| **Web SPA** | React (static files served by nginx, runs in the browser) | the web client: obtains the Google ID token, runs the Strava consent redirect, calls `/api` with a bearer token held in memory ([ADR 0012](../../adr/0012-spa-mobile-stateless-api.md)) |
+| **nginx** | reverse proxy | TLS termination; one origin (`/` → SPA files, `/api` → app, so no CORS); SSE buffering off (`X-Accel-Buffering: no`); fronts the webhook callback |
 | **Aperitivo App** | Spring Boot 4, Java 25, Spring Modulith | the whole application — all six BCs, in-process events, REST + SSE + webhook receiver. One deployable |
 | **PostgreSQL + TimescaleDB** | Postgres + extension | per-BC schemas in one instance; Analytics' `activity_samples` hypertable; the `event_publication` outbox |
-| **Redis** | Redis | rate-limit counters, `jti` denylist, per-user refresh locks — the *multi-instance-ready* state |
+| **Redis** | Redis | rate-limit counters, per-user (Strava) refresh locks — the *multi-instance-ready* state |
 | **OTel Collector + Prometheus + Tempo + Loki + Grafana** | OSS observability | metrics, traces, logs, dashboards ([observability.md](../../operations/observability.md)) |
 
 ## Key facts at this level
@@ -77,13 +83,13 @@ flowchart TB
 - **No message broker.** Inter-BC events are in-process via the `event_publication` outbox in Postgres
   — no Kafka container ([ADR 0008](../../adr/0008-event-transport.md),
   [idempotency-and-outbox.md](../../technical-notes/idempotency-and-outbox.md)).
-- **Redis holds the multi-instance-ready state.** Rate-limit counters, denylist, and locks live in
-  Redis precisely so they're correct across instances — which is why horizontal scaling is gated only
+- **Redis holds the multi-instance-ready state.** Rate-limit counters and locks live in Redis (refresh
+  tokens in Postgres, no HTTP session) precisely so they're correct across instances — which is why horizontal scaling is gated only
   by the in-memory SSE registry, not these ([deployment.md](../../operations/deployment.md)).
 - **No identity-server container.** Identity is in-app (Spring Security + own JWT) — no Keycloak
   ([ADR 0009](../../adr/0009-identity-spring-security.md)). The external identity provider is Google
-  (OIDC), reached over HTTPS for login — not a container we run
-  ([ADR 0011](../../adr/0011-identity-provider-signup.md)).
+  (OIDC): the SPA obtains a Google ID token and the app verifies it against Google's JWKS — not a container we run
+  ([ADR 0011](../../adr/0011-identity-provider-signup.md), [ADR 0012](../../adr/0012-spa-mobile-stateless-api.md)).
 
 ## Not shown here (deferred)
 

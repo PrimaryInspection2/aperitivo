@@ -1,28 +1,36 @@
 # Identity & Access — API
 
-The HTTP surface of the IAM Bounded Context: the Google login flow, the Strava connect flow, the current-user endpoint, source/identity management, and logout. Much of the "login" and "connect" surface is **provided by Spring Security**, not hand-written controllers — this document is explicit about which parts are framework configuration and which are our code.
+The HTTP surface of the IAM Bounded Context: Google login (an ID-token exchange), access-token refresh and logout, the Strava connect endpoint, the current-user endpoint, and source/identity management. The backend is a **stateless JSON API**: there are no server-rendered pages, no OAuth redirect endpoints on the backend, and no `HttpSession`. Clients talk to Google and Strava in the browser or on the device; the backend verifies what they bring back. This document is explicit about which parts are Spring Security configuration and which are our code.
 
-Who may create an account, and why sign-in and data sources are separate: [ADR 0011](../../adr/0011-identity-provider-signup.md). Authentication model and JWT structure: [ADR 0009](../../adr/0009-identity-spring-security.md). Entities and service seams: [domain-model.md](domain-model.md). Events fired: [events.md](events.md).
+Who may create an account, and why sign-in and data sources are separate: [ADR 0011](../../adr/0011-identity-provider-signup.md). Client topology, ID-token login, the security chain and the connect mechanism: [ADR 0012](../../adr/0012-spa-mobile-stateless-api.md). Access and refresh tokens: [ADR 0013](../../adr/0013-access-and-refresh-tokens.md). Own JWT issuer: [ADR 0009](../../adr/0009-identity-spring-security.md). Entities and service seams: [domain-model.md](domain-model.md). Events fired: [events.md](events.md).
+
+## Clients and topology
+
+- The web client is a **React SPA** served from the **same origin** as the API through a reverse proxy: `https://aperitivo.app/` → SPA, `https://aperitivo.app/api/**` → Spring. The browser sees one origin, so **CORS is not enabled at all**. In development a Vite proxy keeps the same arrangement.
+- A **mobile app** (post-MVP) uses the same API and the same login endpoint.
+- Until the SPA exists, the API is exercised with HTTP clients (Postman, IntelliJ HTTP client) carrying a bearer token; integration tests mint tokens directly. There are no server-rendered pages.
 
 ## Endpoint surface
 
 | Method & path | Owner | Auth | Purpose |
 |---|---|---|---|
-| `GET /oauth2/authorization/google` | Spring Security (framework) | none | Initiate Google login — redirect to Google's authorize URL |
-| `GET /login/oauth2/code/google` | Spring Security (framework) + our seams | none (the OAuth `state` guards it) | Google redirect/callback — provisioning + JWT issuance |
-| `GET /connect/strava` | Spring Security (framework) | **required** | Initiate the Strava connect flow |
-| `GET /connect/oauth2/code/strava` | Spring Security (framework) + our seams | **required** | Strava redirect/callback — store tokens, activate the source |
+| `POST /api/auth/google` | our controller | none — the credential is the Google ID token in the body | Sign up / sign in: verify the ID token, provision or resolve the user, issue our tokens |
+| `POST /api/auth/refresh` | our controller | none — the credential is the `refresh_token` cookie | Rotate the refresh token, issue a new access token |
+| `POST /api/auth/logout` | our controller | none — the credential is the `refresh_token` cookie | Revoke the refresh-token family, clear the cookie |
+| `GET /.well-known/jwks.json` | our configuration | none | Public keys of our access-token signing key ([jwt-and-keys.md](../../technical-notes/jwt-and-keys.md)) |
+| `POST /api/connect/strava` | our controller | **required** (bearer) | Exchange a Strava authorization code, connect the data source |
 | `GET /api/me` | our controller | required | Current authenticated user |
 | `GET /api/me/sources` | our controller | required | The user's connected data sources |
 | `DELETE /api/me/sources/{provider}` | our controller | required | Disconnect a data source |
 | `GET /api/me/identities` | our controller | required | The user's sign-in methods |
+| `POST /api/me/identities/{provider}` | our controller | required | Link a second sign-in method (when Apple is added; not in MVP) |
 | `DELETE /api/me/identities/{provider}` | our controller | required | Remove a sign-in method |
-| `POST /api/auth/logout` | our controller | required | Invalidate the session (clear cookie, blacklist `jti`) — optional in MVP |
 
 Notes on what is deliberately absent:
 
-- **No signup/registration endpoint.** Provisioning happens implicitly inside the Google callback on first login.
-- **No Strava login endpoint.** Strava is not a sign-in method; it can only be reached from an authenticated session. See [ADR 0011](../../adr/0011-identity-provider-signup.md).
+- **No signup/registration endpoint.** Provisioning happens implicitly inside `POST /api/auth/google` on the first login for a given Google `sub`.
+- **No Strava login endpoint.** Strava is not a sign-in method; connecting it requires our bearer token. See [ADR 0011](../../adr/0011-identity-provider-signup.md).
+- **No backend OAuth redirect or callback endpoints.** There is no `/oauth2/authorization/*`, `/login/oauth2/code/*` or `/connect/**` path on the backend. `https://aperitivo.app/connect/strava/callback` is an **SPA route**, not a Spring endpoint.
 - **No REST endpoint for Strava tokens.** Those are accessed only in-process via `TokenManager`.
 - **The Strava deauthorization webhook is not here.** It is received by Activity Ingestion's `WebhookController` and routed back to `ConnectedSourceService.markRevoked` — see the "three channels" section of [domain-model.md](domain-model.md).
 
@@ -31,85 +39,109 @@ Notes on what is deliberately absent:
 
 ## Authentication model
 
-**One token, two transports.** Identity is our self-issued RS256 JWT (claims: `sub` = internal `user_id` UUID, `iss`, `iat`, `exp` 24–72h, `jti` — see [domain-model.md](domain-model.md)). The same token is delivered and accepted two ways:
+**Two tokens with different jobs** ([ADR 0013](../../adr/0013-access-and-refresh-tokens.md)):
 
-- **Browser (Thymeleaf + HTMX demo):** the JWT rides in an **HttpOnly cookie**. The browser attaches it automatically; no JavaScript reads or stores the token. This is the transport the built-in demo UI uses.
-- **API clients (canonical):** the JWT is sent as `Authorization: Bearer <jwt>`. This is the documented, canonical way to authenticate against the API.
+| | Access token | Refresh token |
+|---|---|---|
+| Format | RS256 JWT minted by our `JwtEncoder` | opaque, 256 random bits, base64url |
+| Lifetime | **15 minutes** | 14 days of inactivity; the family has an absolute lifetime of 30 days |
+| Claims / content | `sub` = internal `user_id` (UUID), `iss`, `aud` = `aperitivo-api`, `iat`, `exp`, `jti` — nothing else | none; only its SHA-256 hash is stored, in `refresh_tokens` ([database.md](database.md)) |
+| Delivered in | JSON body of `/api/auth/google` and `/api/auth/refresh` | web: `refresh_token` cookie; native (post-MVP): response body |
+| Sent as | `Authorization: Bearer <access token>` on `/api/**` | the cookie, which the browser attaches only to `/api/auth/*` |
+| Kept by the SPA in | a JavaScript variable (memory) — never `localStorage` | nowhere: `HttpOnly`, unreadable by script |
+| Validated by | the resource server, **by signature, `iss`, `aud` and `exp` only** — no database or Redis lookup | `RefreshTokenService`, by hash lookup, on refresh and logout only |
 
-The application is a Spring Security **resource server**: every protected request is authenticated by validating the JWT against our public key (`JwtDecoder`). A custom `BearerTokenResolver` makes the two transports interchangeable — it reads the `Authorization` header first and falls back to the cookie:
+The application is a Spring Security **resource server**. Every request to `/api/**` other than the three `/api/auth/*` endpoints is authenticated by validating our access token with **our** `JwtDecoder` and converting it into a `CurrentUser(UUID userId)` principal. Other modules depend on `CurrentUser` from IAM's published API, never on JWT or OAuth types.
 
-```java
-// Illustrative — prefer the Authorization header, fall back to the auth cookie.
-class CookieOrHeaderBearerTokenResolver implements BearerTokenResolver {
-    private final BearerTokenResolver delegate = new DefaultBearerTokenResolver();
+**Refresh cookie attributes (web):** `refresh_token=<opaque>; HttpOnly; Secure; SameSite=Strict; Path=/api/auth`. `HttpOnly` keeps it away from every script; `Secure` confines it to HTTPS; `SameSite=Strict` stops the browser sending it on any cross-site request; `Path=/api/auth` means it never accompanies an ordinary API call. For native clients the refresh token is returned in the response body and kept in Keychain/Keystore; the mechanism that selects body vs cookie is specified when a native client exists.
 
-    @Override
-    public String resolve(HttpServletRequest request) {
-        String fromHeader = delegate.resolve(request);     // Authorization: Bearer …
-        if (fromHeader != null) return fromHeader;
-        return readCookie(request, "token");               // HttpOnly auth cookie
-    }
-}
-```
+**A Google ID token is never a bearer token on the API.** Google controls its lifetime, its `sub` is the provider's identifier rather than our `user_id`, and we can neither revoke it nor add claims to it. It proves identity once, at `POST /api/auth/google`, and is then discarded. A test asserts that a valid Google ID token is rejected with `401` on `/api/**`.
 
-**Cookie attributes:** `HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age = token TTL`. `HttpOnly` keeps it out of reach of any script (XSS cannot read it); `SameSite=Lax` blocks it from cross-site POSTs; `Secure` confines it to HTTPS.
+**Clients do not send `Authorization` to `/api/auth/**`.** An expired bearer token on a `permitAll` endpoint would still fail in `BearerTokenAuthenticationFilter` with `401` — which would, for example, break a refresh attempted precisely because the access token has expired.
 
-**CSRF.** Because the cookie is sent automatically by the browser, state-changing requests need CSRF protection (Bearer-header requests from API clients do not — there is no ambient credential to forge). Spring Security's built-in CSRF support is enabled; Thymeleaf injects the CSRF token into rendered forms automatically, and HTMX is configured once to send the token as a request header. Read-only endpoints (`GET /api/me`) are unaffected.
+**CSRF protection is disabled.** API requests authenticate by a header the browser never attaches by itself, so there is no ambient credential to forge. The only cookie-borne credential is the refresh cookie, and it is protected by three things together: `SameSite=Strict`; the `/api/auth/*` endpoints accepting only `application/json` (a cross-origin JSON `POST` needs a CORS preflight, which no origin passes); and CORS being off.
 
-```java
-// Illustrative resource-server + login + connect wiring.
-http
-    .oauth2Login(oauth -> oauth                          // SIGN-IN: replaces the SecurityContext
-        .userInfoEndpoint(ui -> ui.oidcUserService(googleOidcUserService))
-        .successHandler(jwtIssuingSuccessHandler))       // mint JWT, set cookie, redirect
-    .oauth2Client(Customizer.withDefaults())             // CONNECT: authorization-code grant only
-    .oauth2ResourceServer(rs -> rs
-        .bearerTokenResolver(cookieOrHeaderBearerTokenResolver)
-        .jwt(Customizer.withDefaults()))                 // validate our RS256 JWT
-    .csrf(Customizer.withDefaults());
-```
+**No per-request denylist in the MVP.** Logout revokes the refresh-token family; the access token stays valid for at most 15 minutes. `jti` is still minted to keep a future "revoke now" (bans, forced logout) open — see [ADR 0013](../../adr/0013-access-and-refresh-tokens.md) §5.
 
 ---
 
-## Two OAuth flows, two pieces of Spring Security
+## Security filter chain
 
-This is the single most important implementation detail in this document. Login and connect are both browser OAuth redirects and look almost identical from the outside. They use **different filters**, start from **different authentication states**, and write to **different tables**.
+**One stateless `SecurityFilterChain`, deny by default** ([ADR 0012](../../adr/0012-spa-mobile-stateless-api.md) §3):
+
+| Path | Rule |
+|---|---|
+| `POST /api/auth/google`, `POST /api/auth/refresh`, `POST /api/auth/logout` | `permitAll` — their credential (the ID token or the refresh cookie) is checked by the controller |
+| `GET /.well-known/jwks.json`, `GET /actuator/health`, `/error` | `permitAll` |
+| `/api/**` | `authenticated` (our bearer token) |
+| anything else | `denyAll` |
+
+- **No `securityMatcher`.** Requests that match no chain bypass Spring Security entirely, and Boot's default chain backs off as soon as any `SecurityFilterChain` bean exists, so a matcher-scoped chain would silently leave every other path (for example actuator endpoints) unprotected. A test asserts that an unknown path is rejected.
+- **`sessionManagement(STATELESS)`**, and no component creates an `HttpSession`. A test asserts that no response sets `JSESSIONID`.
+- **Our decoder is passed explicitly** to the resource server. The Google ID-token verifier is deliberately **not** a `JwtDecoder` bean, so the resource server can never pick it up by accident.
+- Unauthenticated requests get `401` with a Problem Details body from a custom `AuthenticationEntryPoint`.
+- No `oauth2Login`, no `oauth2Client`, no form login, no HTTP Basic.
+
+```java
+// Illustrative — the single chain.
+@Bean
+SecurityFilterChain apiSecurityFilterChain(HttpSecurity http,
+                                           JwtDecoder accessTokenDecoder,                       // OUR decoder
+                                           Converter<Jwt, AbstractAuthenticationToken> currentUserConverter,
+                                           AuthenticationEntryPoint problemDetailsEntryPoint) throws Exception {
+    http
+        // no securityMatcher: this chain sees every request
+        .authorizeHttpRequests(auth -> auth
+            .requestMatchers(HttpMethod.POST, "/api/auth/google", "/api/auth/refresh", "/api/auth/logout").permitAll()
+            .requestMatchers(HttpMethod.GET, "/.well-known/jwks.json", "/actuator/health").permitAll()
+            .requestMatchers("/error").permitAll()
+            .requestMatchers("/api/**").authenticated()
+            .anyRequest().denyAll())
+        .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        .csrf(AbstractHttpConfigurer::disable)
+        .exceptionHandling(e -> e.authenticationEntryPoint(problemDetailsEntryPoint))
+        .oauth2ResourceServer(rs -> rs
+            .authenticationEntryPoint(problemDetailsEntryPoint)
+            .jwt(jwt -> jwt
+                .decoder(accessTokenDecoder)                       // never a Google decoder
+                .jwtAuthenticationConverter(currentUserConverter))); // Jwt → CurrentUser(userId)
+    return http.build();
+}
+```
+
+`accessTokenDecoder` validates our RS256 signature and the `iss`, `aud` (`aperitivo-api`) and `exp` claims; key loading and JWKS are in [jwt-and-keys.md](../../technical-notes/jwt-and-keys.md).
+
+---
+
+## Two provider flows, two different mechanisms
+
+This is the single most important implementation detail in this document. Login and connect both start in the client and both end with the client calling our API, but they use **different protocols**, start from **different authentication states**, and write to **different tables**.
 
 | | Login (Google) | Connect (Strava) |
 |---|---|---|
-| DSL | `oauth2Login` | `oauth2Client` |
-| Filter | `OAuth2LoginAuthenticationFilter` | `OAuth2AuthorizationCodeGrantFilter` |
-| Caller | anonymous | **already authenticated** |
-| SecurityContext | **replaced** with the new principal | **untouched** |
-| Invokes `OAuth2UserService`? | yes | **no** |
-| Writes | `users`, `user_identities` | `connected_sources` |
-| Where `user_id` comes from | created or resolved from the provider `sub` | our own JWT — **never** from Strava |
+| Protocol | OIDC — the client obtains an **ID token** | OAuth 2.0 authorization code, **confidential client** |
+| Browser / device leg | Google Identity Services button (web) or the native Google SDK (mobile) | the SPA navigates to Strava's authorize URL; Strava redirects back to the SPA route `/connect/strava/callback` |
+| Backend endpoint | `POST /api/auth/google { idToken }` | `POST /api/connect/strava { code, scope }` |
+| Caller | anonymous | **already authenticated** by our bearer token |
+| Spring component on the backend | `GoogleIdTokenVerifier` (`NimbusJwtDecoder` + `OidcIdTokenValidator`) | `RestClientAuthorizationCodeTokenResponseClient` + the `strava` `ClientRegistration` |
+| CSRF / forgery guard | JSON-only, no CORS, optional `nonce` | `state`, generated and verified by the SPA |
+| Provider tokens | ID token verified once and discarded | access + refresh tokens stored AES-GCM encrypted |
+| Writes | `users`, `user_identities` (and a `refresh_tokens` row when our tokens are issued) | `connected_sources` |
+| Where `user_id` comes from | created or resolved from the provider's `(issuer, sub)` | our own bearer token — **never** from Strava |
+| Result | our access token + refresh cookie | an `ACTIVE` `ConnectedSource` |
 
-Two consequences follow, and both are easy to get wrong:
+Consequences that are easy to get wrong:
 
-1. **`oauth2Client` never authenticates anyone.** It performs the authorization-code exchange and stores the result in an `OAuth2AuthorizedClient`, and that is all. This is precisely why it is the right mechanism for connecting a source: completing a Strava OAuth flow must not be able to change who you are logged in as. It is also why a Strava connect callback is *impossible* to use as a login backdoor — the filter has no code path that mints an authentication.
+1. **Connect can never authenticate anyone.** `POST /api/connect/strava` requires our bearer token, reads the `user_id` from the `CurrentUser` principal, and has no code path that mints our tokens. Completing a Strava authorization therefore cannot change who you are logged in as, and a Strava code is structurally useless as a login backdoor.
+2. **The SPA owns the browser leg of connect; the backend owns the confidential leg.** The SPA generates and verifies `state` — which is what defeats a forged callback that would attach an attacker's Strava account to the victim's user. The backend exchanges the code with the `client_secret`, which never leaves the server; the code is single-use and useless without it.
+3. **The code exchange does not fetch the athlete profile.** The connect handler calls `GET /api/v3/athlete` **explicitly** (via `StravaApiClient`) to learn the athlete id, which is the `provider_user_id` on the `ConnectedSource`.
+4. **Only OIDC providers can be login methods**, since an ID token is required. Strava — plain OAuth 2.0, no ID token, no email — cannot be, which is consistent with [ADR 0011](../../adr/0011-identity-provider-signup.md).
 
-   > Reference: [Spring Security — Authorization Grant Support](https://docs.spring.io/spring-security/reference/7.0/servlet/oauth2/client/authorization-grants.html)
-
-2. **`oauth2Client` does not call an `OAuth2UserService`.** Nothing fetches the athlete profile for us the way `oauth2Login` did. The connect handler must call `GET /api/v3/athlete` **explicitly** (via `StravaApiClient`) to learn the athlete id, which is the `provider_user_id` on the `ConnectedSource`.
-
-Both flows default to a redirect URI under `/login/oauth2/code/*`, which is exactly the path `OAuth2LoginAuthenticationFilter` claims. They are separated by giving the Strava `ClientRegistration` an explicit distinct `redirect-uri`:
+**Configuration.** Both providers keep their `ClientRegistration` in `application.yaml`. The `google` registration is reused as configuration for the verifier (client ID, issuer); the `strava` registration carries the client secret, endpoints and scopes for the code exchange. The Strava `redirect-uri` is the SPA route, and the same value is sent in the authorize request (by the SPA) and in the token request (by the backend):
 
 ```yaml
-spring.security.oauth2.client.registration.strava.redirect-uri: "{baseUrl}/connect/oauth2/code/{registrationId}"
+spring.security.oauth2.client.registration.strava.redirect-uri: "https://aperitivo.app/connect/strava/callback"   # per environment
 ```
-
-`OAuth2AuthorizationCodeGrantFilter` matches the callback against the registration's own `redirect-uri`, so the path is free-form (Spring's own reference example uses `{baseUrl}/authorized/okta`). Keeping it outside `/login/oauth2/code/*` is what guarantees the login filter never sees a Strava callback.
-
-The friendlier initiation path `/connect/strava` — rather than the framework default `/oauth2/authorization/strava` — comes from giving the grant its own resolver base URI:
-
-```java
-new DefaultOAuth2AuthorizationRequestResolver(clientRegistrationRepository, "/connect")
-```
-
-Because the redirect URI is a property of the registration, **a provider that were ever both a login method and a linkable source would need two registrations** (e.g. `google` and `google-connect`). In MVP the question does not arise: Google is login-only, Strava is connect-only.
-
-**The connect endpoints are protected.** `/connect/**` requires an authenticated session — an anonymous request is a `401`/redirect-to-login, not a silent account creation. Hiding the "connect" buttons in the UI is presentation, not a security control; the authorization rule is the control.
 
 ---
 
@@ -117,48 +149,138 @@ Because the redirect URI is a property of the registration, **a provider that we
 
 ```mermaid
 sequenceDiagram
-    participant B as Browser
-    participant SS as Spring Security
+    participant C as Client (SPA / mobile)
     participant G as Google
+    participant API as API (AuthController)
     participant IAM as IAM services
 
-    B->>SS: GET /oauth2/authorization/google
-    SS-->>B: 302 redirect to Google authorize (client_id, scopes, state, nonce)
-    B->>G: GET /o/oauth2/v2/auth
-    G-->>B: consent page
-    B->>G: user approves
-    G-->>B: 302 redirect to /login/oauth2/code/google?code=...&state=...
-    B->>SS: GET /login/oauth2/code/google?code=...&state=...
-    SS->>G: POST /token (exchange code)
-    G-->>SS: ID token (JWT) + access token
-    SS->>SS: validate ID token signature, iss, aud, nonce, exp
-    SS->>IAM: OidcUserService.loadUser(...)
-    IAM-->>SS: ProviderIdentityProfile (sub, email, name, picture)
-    SS->>IAM: success handler -> LoginService.login(profile)
-    Note over IAM: resolve UserIdentity by (GOOGLE, sub);<br/>create User + UserIdentity if absent;<br/>publish UserRegisteredEvent on first login only
-    IAM-->>SS: LoginResult(userId, isNewUser)
-    SS-->>B: Set-Cookie token=JWT + 302 redirect (/connect if new, / otherwise)
+    C->>G: Google Identity Services button / native SDK
+    G-->>C: Google ID token (JWT)
+    C->>API: POST /api/auth/google { idToken }
+    API->>IAM: GoogleIdTokenVerifier.verify(idToken, nonce?)
+    Note over IAM: signature (Google JWKS), exp/iat,<br/>iss, aud, azp, email_verified, nonce
+    IAM-->>API: ProviderIdentityProfile (GOOGLE, sub, email, name, picture)
+    API->>IAM: LoginService.login(profile)
+    Note over IAM: resolve UserIdentity by (GOOGLE, sub),<br/>create User + UserIdentity if absent,<br/>publish UserRegisteredEvent on first login only
+    IAM-->>API: LoginResult(userId, isNewUser)
+    API->>IAM: AccessTokenIssuer.issue(userId), RefreshTokenService.startFamily(userId)
+    API-->>C: 200 { accessToken, tokenType, expiresIn } + Set-Cookie refresh_token
 ```
 
-### `GET /oauth2/authorization/google` — initiate
+The detailed diagram with transaction boundaries: [google-login.md](diagrams/sequence/google-login.md).
 
-Pure framework. Spring Security redirects to Google with our `client_id`, the scopes (`openid`, `email`, `profile`), a generated `state` (the OAuth-flow CSRF guard) and a `nonce`. We write no controller; we supply the `ClientRegistration` in configuration. We are a **confidential** client — the `client_secret` stays server-side and the code-for-token exchange is server-to-server.
+### `POST /api/auth/google`
 
-### `GET /login/oauth2/code/google` — callback
+**Request:**
 
-Google is **OIDC**, so the token response includes an **ID token**: a signed JWT whose `sub` claim is the stable subject identifier. Spring Security validates its signature (against Google's JWKS), issuer, audience, `nonce`, and expiry before any of our code runs. That validation is the whole reason an identity provider can be trusted to establish identity while Strava — plain OAuth 2.0, no ID token, no email — cannot.
+```http
+POST /api/auth/google
+Content-Type: application/json
 
-Two seams of our code then run:
+{ "idToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6…" }
+```
 
-1. **`OidcUserService` (custom).** Maps the validated claims to a `ProviderIdentityProfile` (`provider=GOOGLE`, `providerUserId=sub`, `email`, `displayName`, `avatarUrl`). Note the type: OIDC providers go through `oidcUserService(...)`, not `userService(...)`.
+```java
+public record GoogleLoginRequest(
+        String idToken,   // Google ID token — never the Google access token
+        String nonce      // optional; see below
+) {}
+```
 
-2. **`AuthenticationSuccessHandler` (custom).** Calls `LoginService.login(profile)`, which resolves the `UserIdentityEntity` by `(GOOGLE, sub)` and either touches `lastLoginAt` or creates a `UserEntity` + `UserIdentityEntity` and publishes `UserRegisteredEvent`. It returns `LoginResult(userId, isNewUser)`. The handler then mints our JWT for that `userId`, sets the HttpOnly cookie, and redirects. Minting happens **outside** `login(...)` — the JWT is a transport concern of the login endpoint, not part of the provisioning transaction (see [domain-model.md](domain-model.md#why-it-returns-a-value-and-not-void)).
+The client obtains a Google **ID token**. The Google **access token** is never requested or accepted: it is meant for Google APIs and is not bound to our audience, so using it as proof of identity would enable token substitution. When the client passed a `nonce` to Google, the backend compares it with the token's `nonce` claim; how the client supplies the expected value is specified at implementation time.
 
-**No tokens are stored.** Google's access token and ID token are discarded once the identity is established; there is no background work to do on the user's behalf at Google. `user_identities` has no token columns ([database.md](database.md)).
+**Verification — Spring Security components, not hand-written code.** Encapsulated in the IAM component `GoogleIdTokenVerifier`:
 
-**`isNewUser` decides the landing page.** A brand-new account has *no data whatsoever* — no sources, so no workouts, no analytics, nothing. It is redirected into the connect step. A returning user goes to the app home. This is the visible consequence of separating signup from connecting.
+```java
+// Illustrative — the decoder is a private field, NOT a JwtDecoder bean.
+@Component
+class GoogleIdTokenVerifier {
 
-**Failure handling.** If the user denies consent, or the exchange or ID-token validation fails, Spring Security's failure handler redirects to the login page with an error indication. No `User` and no `UserIdentity` are created; no event is emitted.
+    private final JwtDecoder googleIdTokenDecoder;
+
+    GoogleIdTokenVerifier(ClientRegistrationRepository registrations) {
+        ClientRegistration google = registrations.findByRegistrationId("google");
+        NimbusJwtDecoder decoder = NimbusJwtDecoder
+                .withIssuerLocation("https://accounts.google.com")     // Google JWKS, cached, selected by kid
+                .build();
+        decoder.setJwtValidator(JwtValidators.createDefaultWithValidators(
+                new OidcIdTokenValidator(google),                        // iss, aud (our client ID), azp
+                new JwtClaimValidator<Boolean>("email_verified", Boolean.TRUE::equals)));
+        this.googleIdTokenDecoder = decoder;
+    }
+
+    ProviderIdentityProfile verify(String idToken, @Nullable String expectedNonce) {
+        Jwt jwt = googleIdTokenDecoder.decode(idToken);                  // signature, exp/iat + validators
+        // compare jwt.getClaimAsString("nonce") with expectedNonce when one was supplied
+        // map sub, email, name, picture → ProviderIdentityProfile(GOOGLE, …)
+    }
+}
+```
+
+Google ID tokens may carry `iss` as either `accounts.google.com` or `https://accounts.google.com`; an integration test with real tokens pins this down, and both forms are accepted if needed.
+
+**Provisioning.** `LoginService.login(profile)` resolves the `UserIdentityEntity` by `(GOOGLE, sub)` and either touches `lastLoginAt` or creates a `UserEntity` + `UserIdentityEntity` and publishes `UserRegisteredEvent` — exactly as [ADR 0011](../../adr/0011-identity-provider-signup.md) specifies. It returns `LoginResult(userId, isNewUser)`. Token issuance happens **outside** `login(...)` — our tokens are a transport concern of the login endpoint, not part of the provisioning transaction (see [domain-model.md](domain-model.md#why-it-returns-a-value-and-not-void)).
+
+**Response `200`:**
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Set-Cookie: refresh_token=<opaque>; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age=<refresh lifetime>
+
+{ "accessToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6…", "tokenType": "Bearer", "expiresIn": 900 }
+```
+
+A successful login starts a **new refresh-token family** (one sign-in on one device).
+
+**No Google tokens are stored.** The ID token is discarded once the identity is established; there is no background work to do on the user's behalf at Google. `user_identities` has no token columns ([database.md](database.md)).
+
+**Onboarding routing is the client's.** A brand-new account has *no data whatsoever*. The SPA reads `GET /api/me` after login and, while `sources` is empty, routes the user to the connect step ([ADR 0011](../../adr/0011-identity-provider-signup.md) §5) — the same rule covers a returning user who never connected anything.
+
+**Failures.** A missing, malformed, expired or otherwise invalid ID token (bad signature, wrong `aud`/`azp`, `email_verified` not `true`, `nonce` mismatch) → `401` Problem Details. No `User`, no `UserIdentity`, no event, no cookie. A non-JSON request → `415`.
+
+---
+
+## Refresh and logout
+
+### `POST /api/auth/refresh`
+
+Called by the SPA on page load (it keeps the access token only in memory) and whenever the access token is about to expire or has expired. The SPA shares **a single in-flight refresh across tabs**.
+
+**Request:** the `refresh_token` cookie, attached by the browser; `Content-Type: application/json` (an empty `{}` body); **no `Authorization` header**.
+
+Each call ([ADR 0013](../../adr/0013-access-and-refresh-tokens.md) §3):
+
+1. looks up the presented token by SHA-256 hash and checks that it is unexpired, unused and not revoked, and that its family is within the 30-day absolute lifetime;
+2. marks it `used_at = now`;
+3. issues a **new** refresh token in the **same family** and a new access token.
+
+**Response `200`:** the same body as login, and a `Set-Cookie` carrying the rotated refresh token.
+
+```json
+{ "accessToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6…", "tokenType": "Bearer", "expiresIn": 900 }
+```
+
+**Reuse detection.** Presenting an **already-used** token means two parties hold it. The server cannot tell which one is legitimate, so it **revokes the whole family** and answers `401`; both must sign in again through Google, and only the legitimate user can. To keep two tabs refreshing at the same instant from looking like theft, the just-rotated token stays acceptable for a **grace window of 10–30 s** (the exact value is set at implementation time).
+
+**Failures.** No cookie, an unknown, expired or revoked token, a family past its absolute lifetime, or detected reuse → `401` Problem Details. The client then shows the Google sign-in.
+
+### `POST /api/auth/logout`
+
+**Request:** the `refresh_token` cookie; `Content-Type: application/json`; no `Authorization` header — logout identifies the session by the refresh cookie, so it works even when the access token has expired.
+
+**Effect:** revokes the **family** of the presented refresh token and clears the cookie with the same `Path` and attributes:
+
+```http
+HTTP/1.1 204 No Content
+Set-Cookie: refresh_token=; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age=0
+```
+
+**Idempotent.** No cookie, an unknown token or an already-revoked family still answer `204` and clear the cookie.
+
+The client discards the in-memory access token and calls `google.accounts.id.disableAutoSelect()`, so Google One Tap does not sign the user straight back in. Our logout does not sign the user out of Google.
+
+**The access token stays valid for at most 15 minutes after logout.** This is accepted: logout ends a session; theft is handled by rotation and family revocation. **"Log out everywhere"** revokes every family of the user; its endpoint is specified at implementation time.
 
 ---
 
@@ -166,37 +288,76 @@ Two seams of our code then run:
 
 ```mermaid
 sequenceDiagram
-    participant B as Browser (authenticated)
-    participant SS as Spring Security
-    participant Strava
+    participant SPA as SPA (signed in)
+    participant ST as Strava
+    participant API as API (ConnectController)
     participant IAM as IAM services
 
-    B->>SS: GET /connect/strava   (JWT cookie present)
-    SS->>SS: authorize: authenticated? else 401 / redirect to login
-    SS-->>B: 302 redirect to Strava authorize (client_id, scopes, state)
-    B->>Strava: GET /oauth/authorize
-    Strava-->>B: consent page
-    B->>Strava: user approves
-    Strava-->>B: 302 redirect to /connect/oauth2/code/strava?code=...&state=...&scope=...
-    B->>SS: GET /connect/oauth2/code/strava?code=...&state=...
-    SS->>Strava: POST /oauth/token (exchange code)
-    Strava-->>SS: access + refresh tokens
-    Note over SS: OAuth2AuthorizedClient stored.<br/>SecurityContext UNCHANGED — still the same user.
-    SS->>IAM: connect handler (userId from the JWT, not from Strava)
-    IAM->>Strava: GET /api/v3/athlete
-    Strava-->>IAM: athlete profile (id, name, avatar)
-    IAM->>IAM: ConnectedSourceService.connect(userId, STRAVA, athleteId, tokens)
-    Note over IAM: create or reactivate the source with AES-GCM-encrypted tokens;<br/>publish IntegrationConnectedEvent on the transition to ACTIVE
-    IAM-->>B: 302 redirect to the sources page
+    SPA->>SPA: state → sessionStorage
+    SPA->>ST: navigate to /oauth/authorize (client_id, scope, state,<br/>redirect_uri=https://aperitivo.app/connect/strava/callback)
+    ST-->>SPA: consent → 302 to /connect/strava/callback?code&scope&state
+    SPA->>SPA: check state, drop code from the URL,<br/>POST /api/auth/refresh if needed
+    SPA->>API: POST /api/connect/strava { code, scope } + Bearer
+    API->>ST: POST /oauth/token (code, client_secret) — RestClientAuthorizationCodeTokenResponseClient
+    ST-->>API: access + refresh tokens
+    API->>API: require activity:read_all
+    API->>ST: GET /api/v3/athlete
+    ST-->>API: athlete id, name, avatar
+    API->>IAM: ConnectedSourceService.connect(userId from bearer, STRAVA, athleteId, tokens)
+    Note over IAM: create or reactivate the source with AES-GCM-encrypted tokens,<br/>publish IntegrationConnectedEvent on the transition to ACTIVE
+    API-->>SPA: 200 connected source
 ```
 
-The `userId` written to `connected_sources` comes from the **JWT of the current session**. Strava's response contributes the athlete id and the tokens, and nothing else. Identity is never inferred from a data-source provider — the invariant that survived from [ADR 0010](../../adr/0010-single-canonical-login-provider-superseded.md) into [ADR 0011](../../adr/0011-identity-provider-signup.md).
+The detailed diagram with transaction boundaries: [strava-connect.md](diagrams/sequence/strava-connect.md).
+
+### `POST /api/connect/strava`
+
+**Request:**
+
+```http
+POST /api/connect/strava
+Authorization: Bearer <access token>
+Content-Type: application/json
+
+{ "code": "a1b2c3…", "scope": "read,activity:read_all,profile:read_all" }
+```
+
+`code` and `scope` are the values Strava appended to the SPA callback route. Before calling, the SPA has verified `state` against `sessionStorage`, removed `code` from the URL, and made sure it holds a fresh access token.
+
+**Handling:**
+
+1. The code is exchanged server-side with the `strava` `ClientRegistration`:
+
+   ```java
+   // Illustrative.
+   ClientRegistration strava = registrations.findByRegistrationId("strava");
+   OAuth2AuthorizationExchange exchange = new OAuth2AuthorizationExchange(
+           OAuth2AuthorizationRequest.authorizationCode()
+                   .authorizationUri(strava.getProviderDetails().getAuthorizationUri())
+                   .clientId(strava.getClientId())
+                   .redirectUri(strava.getRedirectUri())   // the SPA route, as in the authorize request
+                   .scopes(strava.getScopes())
+                   .build(),
+           OAuth2AuthorizationResponse.success(request.code())
+                   .redirectUri(strava.getRedirectUri())
+                   .build());
+   OAuth2AccessTokenResponse tokens = new RestClientAuthorizationCodeTokenResponseClient()
+           .getTokenResponse(new OAuth2AuthorizationCodeGrantRequest(strava, exchange));
+   ```
+
+2. Strava lets the user deselect scopes, so a connection without `activity:read_all` is **rejected**.
+3. `GET /api/v3/athlete` yields the athlete id.
+4. `ConnectedSourceService.connect(currentUser.userId(), STRAVA, athleteId, tokens)` creates or reactivates the source.
+
+The `userId` written to `connected_sources` comes **only from our bearer token**. Strava contributes the athlete id and the tokens, and nothing else. Identity is never inferred from a data-source provider ([ADR 0011](../../adr/0011-identity-provider-signup.md) §3).
 
 `ConnectedSourceService.connect` covers first connect, no-op re-connect of an already-active source, and reactivation after a revoke; which of those fires `IntegrationConnectedEvent` is specified in [domain-model.md](domain-model.md) and [events.md](events.md). Reactivation is **in-place** for the same athlete — see the reconnect table in [database.md](database.md).
 
-> We do **not** use Spring Security's `OAuth2AuthorizedClientService` as the durable token store. Strava tokens live in our `ConnectedSource` (owned by IAM, accessed only via `TokenManager`) — see [ADR 0003](../../adr/0003-token-storage-strategy.md). The `OAuth2AuthorizedClient` is just the framework's transient carrier from which we extract the tokens once.
+**Response:** `200` with the connected source (`SourceDto`, below); the exact success shape is fixed at implementation time.
 
-**Failure handling.** Denied consent or a failed exchange redirects back to the sources page with an error indication. No `ConnectedSource` is created or modified; no event is emitted. **The user stays logged in** — a failed connect has no bearing on the session, which is exactly the property `oauth2Client` buys us.
+> We do **not** use Spring Security's `OAuth2AuthorizedClientService` as a token store. Strava tokens live in our `ConnectedSource` (owned by IAM, accessed only via `TokenManager`) — see [ADR 0003](../../adr/0003-token-storage-strategy.md). The `OAuth2AccessTokenResponse` is a transient carrier from which we extract the tokens once.
+
+**Failures.** No or expired bearer → `401`. Missing `code`, a failed exchange (invalid, expired or already-used code), a missing `activity:read_all` scope, or a failed athlete lookup → a Problem Details error; error types are fixed at implementation time. No `ConnectedSource` is created or modified and no event is emitted. **The user stays signed in** — a failed connect has no bearing on their tokens.
 
 **Conflict.** If that Strava athlete is already connected to a different Aperitivo user, the connect is rejected with `409 …/errors/source-already-linked`. The source is never moved between accounts silently.
 
@@ -205,7 +366,7 @@ The `userId` written to `connected_sources` comes from the **JWT of the current 
 
 ## `GET /api/me`
 
-Returns the authenticated user. Auth required (cookie or Bearer); `401` otherwise.
+Returns the authenticated user. Auth required (bearer); `401` otherwise.
 
 **Response `200`:**
 
@@ -248,11 +409,11 @@ public record SourceDto(
 ) {}
 ```
 
-**`sources` is a list, and it may be empty.** That is not an edge case to code around — it is the normal state of every account between signing up and connecting something, and the permanent state of anyone who never connects. Clients must render an empty state, not an error. The previous single-valued `connection` field could not express this, because under the old model a user could not exist without a Strava source.
+**`sources` is a list, and it may be empty.** That is not an edge case to code around — it is the normal state of every account between signing up and connecting something, and the permanent state of anyone who never connects. Clients must render an empty state (or the onboarding connect step), not an error. The previous single-valued `connection` field could not express this, because under the old model a user could not exist without a Strava source.
 
 **`identities` is never empty** — invariant 4 in [domain-model.md](domain-model.md). Both lists deliberately omit provider user ids: the Google `sub` and the Strava athlete id are internal join keys, not client-facing data.
 
-`sources` carries only IAM-owned health (`provider`, `status`) — enough for the UI to show "connected" vs "reconnect needed". It deliberately does **not** carry ingestion/backfill progress ("imported 124 of 540") — that is Activity Ingestion's concern, surfaced via SSE, not here. The `user_id` is resolved from the JWT `sub`; the endpoint never trusts a client-supplied id.
+`sources` carries only IAM-owned health (`provider`, `status`) — enough for the UI to show "connected" vs "reconnect needed". It deliberately does **not** carry ingestion/backfill progress ("imported 124 of 540") — that is Activity Ingestion's concern, surfaced via SSE, not here. The `user_id` is taken from the `CurrentUser` principal (our access token's `sub`); the endpoint never trusts a client-supplied id. Profile data lives here rather than in the access token, whose claims are deliberately minimal.
 
 ---
 
@@ -272,6 +433,10 @@ Disconnecting a source **never** deletes the account and never touches `user_ide
 
 The user's sign-in methods — the `IdentityDto` list. Returns `200`.
 
+## `POST /api/me/identities/{provider}` (when Apple is added)
+
+Links a second sign-in method to the authenticated user. The body is `{ "idToken": "…" }` from that provider's client SDK, verified by the same verifier mechanism as login ([ADR 0012](../../adr/0012-spa-mobile-stateless-api.md) §5). The rules of [ADR 0011](../../adr/0011-identity-provider-signup.md) §4 hold unchanged: login never merges, and a provider identity already bound to a different user is `409 …/errors/identity-already-linked` — never a re-assignment. Not part of the MVP surface, where Google is the only identity provider.
+
 ## `DELETE /api/me/identities/{provider}`
 
 Removes a sign-in method. Returns `204`.
@@ -282,25 +447,18 @@ In MVP, with Google as the only identity provider, every user has exactly one id
 
 ---
 
-## `POST /api/auth/logout` (optional in MVP)
-
-Invalidates the current session: clears the auth cookie (`Set-Cookie: token=; Max-Age=0`) and adds the token's `jti` to a Redis blacklist with TTL equal to the token's remaining lifetime, so a still-valid Bearer copy cannot be reused. Returns `204`.
-
-This is **optional** for the MVP: with short-lived tokens, logout can be reduced to clearing the cookie (the Bearer path simply lets the token expire), and the `jti` blacklist can be deferred. See [ADR 0009](../../adr/0009-identity-spring-security.md) and the JWT technical note.
-
----
-
 ## Errors
 
 | Status | When |
 |---|---|
-| `401 Unauthorized` | No token, expired token, bad signature, or a blacklisted `jti` on a protected endpoint — including an anonymous request to `/connect/**` |
-| `403 Forbidden` | Valid token but a missing/invalid CSRF token on a cookie-authenticated mutating request |
+| `400 Bad Request` | Malformed request body (e.g. missing `idToken` or `code`) |
+| `401 Unauthorized` | On `/api/**`: no access token, expired token, bad signature, wrong `iss`/`aud` — including a Google ID token presented as a bearer. On `/api/auth/google`: an invalid ID token. On `/api/auth/refresh`: a missing, unknown, expired, revoked or reused refresh token |
+| `403 Forbidden` | An authenticated request to a path outside the allow-list (`denyAll`); the same request without a token gets `401` |
 | `404 Not Found` | `…/errors/source-not-found` — disconnecting a provider the user has not connected |
 | `409 Conflict` | `…/errors/source-already-linked`, `…/errors/identity-already-linked`, `…/errors/last-identity` |
-| `302 Found` | OAuth redirects (initiate → provider; callback → app home / sources page on success, error page on failure) |
+| `415 Unsupported Media Type` | A non-JSON request to `/api/auth/*` |
 
-Error bodies for the JSON API follow the project-wide [API error conventions](../../conventions/api-errors.md) (RFC 7807 `application/problem+json`); the OAuth endpoints redirect rather than return JSON, since they are browser-driven.
+Every endpoint returns JSON; there are no backend redirects. Error bodies follow the project-wide [API error conventions](../../conventions/api-errors.md) (RFC 7807 `application/problem+json`); the `401` body is written by the custom `AuthenticationEntryPoint`.
 
 Conflict bodies name the constraint but never the other account:
 
@@ -310,7 +468,7 @@ Conflict bodies name the constraint but never the other account:
   "title": "Data source already linked",
   "status": 409,
   "detail": "This Strava account is already connected to another Aperitivo user.",
-  "instance": "/connect/oauth2/code/strava"
+  "instance": "/api/connect/strava"
 }
 ```
 
@@ -320,7 +478,10 @@ Naming the other user — or even confirming their email — would turn a confli
 
 ## What is intentionally NOT in this API (MVP)
 
-- **No self-issued-JWT refresh endpoint.** When our JWT expires (24–72h) the user re-authenticates via Google (a redirect, usually with no re-consent). Silent refresh is a later optimization.
+- **No server-side session.** No `HttpSession`, no Spring Session, no sticky routing; every API request is authenticated by its bearer token alone.
+- **No per-request `jti` denylist.** Revocation is by refresh-token family; residual access after logout is bounded by the 15-minute access-token lifetime ([ADR 0013](../../adr/0013-access-and-refresh-tokens.md)).
+- **No CORS.** The SPA is same-origin behind the reverse proxy.
+- **No refresh token in the response body for web clients.** The body transport exists only for native clients, post-MVP.
 - **No profile-update endpoint.** `UserService.updateProfile` exists in the domain model but is not exposed in the MVP surface; profile fields come from the identity provider at provisioning.
 - **No Strava-token endpoints.** `TokenManager` is an in-process interface used only by Activity Ingestion — never HTTP.
 - **No account-merge endpoint.** Two accounts are never merged; see the alternatives section of [ADR 0011](../../adr/0011-identity-provider-signup.md).
@@ -334,5 +495,4 @@ Naming the other user — or even confirming their email — would turn a confli
 - Sequence diagrams: [google-login.md](diagrams/sequence/google-login.md), [strava-connect.md](diagrams/sequence/strava-connect.md), [revocation-flow.md](diagrams/sequence/revocation-flow.md)
 - [domain-model.md](domain-model.md), [database.md](database.md), [events.md](events.md) — already written
 - [token-management.md](../../technical-notes/token-management.md) — already written
-- [jwt-and-keys.md](../../technical-notes/jwt-and-keys.md) — `JwtEncoder`/`JwtDecoder` setup, RS256 key loading, JWKS, `jti` blacklist
-
+- [jwt-and-keys.md](../../technical-notes/jwt-and-keys.md) — `JwtEncoder`/`JwtDecoder` setup, RS256 key loading, JWKS, access/refresh lifetimes

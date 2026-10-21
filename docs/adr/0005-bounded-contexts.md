@@ -2,7 +2,6 @@
 
 - **Status:** Accepted
 - **Date:** 2026-05-20
-- **Reviewed:** 2026-06-14 (event-transport phrasing updated; decomposition unchanged)
 
 ## Context
 
@@ -46,7 +45,7 @@ Rejected. Tempting because every analytics query "wants to join with workouts" â
 
 ### Adding a Social/Challenges BC
 
-Rejected. See [ADR 0006](0006-no-social-challenges.md).
+Rejected: social features and public challenges are a non-goal â€” Strava already does them well ([overview](../architecture/overview.md#non-goals)).
 
 ### Adding a Coaching BC
 

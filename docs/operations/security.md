@@ -15,8 +15,14 @@ In priority order:
    Stored AES-GCM-encrypted in Postgres ([encryption-at-rest.md](../technical-notes/encryption-at-rest.md)).
 2. **Our JWT signing key** (RS256 private key) — a leak lets an attacker mint valid identities. Held
    as a secret, env-sourced in MVP / KMS-backed in production ([jwt-and-keys.md](../technical-notes/jwt-and-keys.md)).
-3. **The Strava client secret** — a leak compromises the whole app's Strava integration.
-4. **User data** (workouts, analytics) — lower sensitivity but still private.
+3. **Users' refresh tokens** — a stolen one keeps a session alive for up to its family's lifetime
+   until reuse is detected. Stored only as SHA-256 hashes in `refresh_tokens`; on the web the token
+   lives in an `HttpOnly` cookie that no script can read
+   ([ADR 0013](../adr/0013-access-and-refresh-tokens.md), [jwt-and-keys.md](../technical-notes/jwt-and-keys.md#the-refresh-token)).
+4. **The Strava client secret** — a leak compromises the whole app's Strava integration. It never
+   leaves the backend: the SPA drives the browser leg of the connect flow, the backend does the code
+   exchange ([ADR 0012](../adr/0012-spa-mobile-stateless-api.md) §4).
+5. **User data** (workouts, analytics) — lower sensitivity but still private.
 
 The data we *don't* heavily protect (workout summaries, analytics) is a deliberate scoping: encrypt
 credentials and secrets, keep domain data queryable
@@ -26,13 +32,15 @@ credentials and secrets, keep domain data queryable
 
 | Surface | Exposure | Primary defense |
 |---|---|---|
-| Google OIDC login callback (`/login/oauth2/code/google`) | public | Spring Security framework, `state` CSRF guard |
-| Strava connect callback (`/connect/oauth2/code/strava`) | public, JWT-gated | Spring Security `oauth2Client`, `state` guard; connect chain requires an authenticated caller |
+| Login (`POST /api/auth/google`) | public | Google ID token verified by Spring Security components (signature via Google JWKS, `iss`, `aud`, `azp`, `exp`, `email_verified`, optional `nonce`); JSON-only, no CORS |
+| Refresh / logout (`POST /api/auth/refresh`, `/api/auth/logout`) | public, refresh-cookie-gated | opaque refresh token looked up by hash; rotation + reuse detection; cookie `SameSite=Strict`, `Path=/api/auth`; JSON-only, no CORS |
+| Strava connect (`POST /api/connect/strava`) | public, JWT-gated | bearer token required; `user_id` from the bearer only; `state` verified by the SPA before the code is sent; code exchanged server-side with the `client_secret` |
+| JWKS (`GET /.well-known/jwks.json`) | public | serves public keys only |
 | Webhook receiver (`POST /api/webhooks/strava`) | public | `subscription_id` filter + authenticated re-fetch as the real trust boundary |
 | Webhook validation (`GET …`) | public | `hub.verify_token` match |
 | Authenticated API (`/api/**`) | public, JWT-gated | RS256 JWT validation per resource-server BC |
 | SSE stream (`/api/sse/events`) | public, JWT-gated | JWT validation; per-user emitter scoping |
-| Admin/ops endpoints (Actuator) | internal | network-restricted, not public |
+| Admin/ops endpoints (Actuator) | internal | network-restricted, not public; only `/actuator/health` is `permitAll`, everything else not explicitly listed is `denyAll` |
 
 ### The webhook trust model (the subtle one)
 
@@ -61,9 +69,29 @@ into an image; all are injected at deploy time.
 
 ## Authentication & authorization
 
-- **Authentication:** our RS256 JWT, validated by every BC as a Spring Security resource server.
-  `sub` = internal `user_id`. Stateless; optional Redis `jti` denylist for immediate logout
-  ([jwt-and-keys.md](../technical-notes/jwt-and-keys.md)).
+- **Login:** the client (Google Identity Services on the web, the native SDK on mobile) obtains a
+  Google **ID token** and exchanges it at `POST /api/auth/google`. The backend verifies it in
+  `GoogleIdTokenVerifier`, resolves or provisions the `User` by `(issuer, sub)` and issues our tokens.
+  No `oauth2Login`, no redirect callback, no `HttpSession`
+  ([ADR 0012](../adr/0012-spa-mobile-stateless-api.md)). A Google ID token is never accepted as an API
+  bearer token.
+- **Authentication:** our RS256 **access token** (15 min, `aud` = `aperitivo-api`), sent as
+  `Authorization: Bearer` and validated by signature, `iss`, `aud` and `exp` only — no per-request
+  lookup. `sub` = internal `user_id`. The SPA keeps it in memory; a **rotating refresh token**
+  (`HttpOnly` cookie on the web) obtains new ones
+  ([ADR 0013](../adr/0013-access-and-refresh-tokens.md), [jwt-and-keys.md](../technical-notes/jwt-and-keys.md)).
+- **Security filter chain:** one stateless chain, **deny by default** — the `/api/auth/*` endpoints,
+  JWKS, `/actuator/health` and `/error` are `permitAll`, `/api/**` requires a bearer token, anything
+  else is `denyAll`. No `securityMatcher`, `sessionManagement(STATELESS)`, and no response sets
+  `JSESSIONID`. Unauthenticated requests get `401` Problem Details
+  ([ADR 0012](../adr/0012-spa-mobile-stateless-api.md) §3).
+- **CSRF:** protection is **disabled**. API requests authenticate by a header the browser never
+  attaches by itself; the only cookie-borne credential is the refresh cookie, protected by
+  `SameSite=Strict`, `Path=/api/auth`, JSON-only endpoints (a cross-origin JSON `POST` needs a CORS
+  preflight) and **CORS being off** — the SPA and the API share one origin behind the reverse proxy.
+- **Logout:** `POST /api/auth/logout` revokes the refresh-token family and clears the cookie; the
+  access token stays valid for at most 15 minutes, which is accepted. No `jti` denylist in the MVP
+  ([ADR 0013](../adr/0013-access-and-refresh-tokens.md) §4–5).
 - **Authorization:** MVP is single-user-type — every authenticated user accesses **only their own**
   data, enforced by scoping every query to the JWT's `user_id` (never a client-supplied id). There
   is no role model yet; when one arrives it is an additive JWT claim.
@@ -72,8 +100,9 @@ into an image; all are injected at deploy time.
 
 ## Encryption
 
-- **In transit:** HTTPS everywhere (TLS terminated at nginx); the SSE stream and webhook callback are
-  HTTPS. Strava requires HTTPS callback URLs.
+- **In transit:** HTTPS everywhere (TLS terminated at nginx, which also routes `/` to the SPA and
+  `/api/**` to Spring on the same origin); the SSE stream and webhook callback are HTTPS. Strava
+  requires HTTPS callback URLs. The refresh cookie is `Secure`.
 - **At rest:** AES-GCM column encryption for token columns; the rest of the DB relies on
   deployment-level disk encryption if present ([encryption-at-rest.md](../technical-notes/encryption-at-rest.md)).
 
@@ -82,8 +111,9 @@ into an image; all are injected at deploy time.
 - **Token access is audited** — every use of a decrypted token logs the *fact* (user, operation,
   `trace_id`), never the value ([token-management.md](../technical-notes/token-management.md)).
 - **Security-significant transitions** logged at WARN: source REVOKED, JWT validation failures
-  (by reason), repeated 401s from Strava.
-- **Logs never contain secrets** — enforced as a policy and a review item
+  (by reason), refresh-token reuse (family revoked), repeated 401s from Strava.
+- **Logs never contain secrets** — no access, refresh or Google ID tokens, no Strava codes — enforced
+  as a policy and a review item
   ([observability.md](observability.md)).
 
 ## GDPR / data lifecycle (MVP posture)
@@ -110,9 +140,13 @@ into an image; all are injected at deploy time.
 |---|---|---|
 | DB dump leak | ✅ | token columns encrypted; useless without key/KEK |
 | Forged webhook | ✅ | identifiers-only + authenticated re-fetch; worst case a wasted GET |
-| Stolen JWT | ⚠️ partial | short expiry; optional `jti` denylist for immediate revoke |
+| Stolen access token | ⚠️ partial | 15-minute lifetime; held in memory only; no immediate revoke in MVP (`jti` kept for a future denylist) |
+| Stolen refresh token | ✅ (mitigated) | `HttpOnly` path-scoped cookie; rotation on every use, reuse revokes the whole family; hashed at rest |
+| XSS in the SPA | ⚠️ partial | access token in memory, refresh token unreadable by script; CSP and dependency hygiene limit injection ([ADR 0012](../adr/0012-spa-mobile-stateless-api.md)) |
 | Signing-key leak | ✅ (mitigated) | env→KMS custody; rotation via JWKS `kid` overlap |
-| CSRF on OAuth | ✅ | Spring Security `state` parameter |
+| CSRF on Strava connect (forged callback) | ✅ | `state` generated and verified by the SPA; `user_id` from the bearer only |
+| CSRF on the API / refresh cookie | ✅ | bearer header auth; refresh cookie `SameSite=Strict`, JSON-only, no CORS |
+| Login CSRF / replayed Google ID token | ⚠️ partial | JSON-only, no CORS, optional `nonce`; ID token is audience-bound and short-lived |
 | Cross-user data access | ✅ | every query scoped to JWT `user_id`; 404 on non-owned |
 | Compromised live host (key in memory) | ⚠️ partial | MVP env-key in memory; envelope encryption shrinks blast radius |
 | Strava API suspension (availability) | ⚠️ | rate-limit governance; single-dependency risk is accepted ([overview](../architecture/overview.md)) |
@@ -130,6 +164,11 @@ hardening path (envelope encryption, KMS) documented.
 - **No MFA / enterprise SSO** — single Google OIDC login (one identity provider; Strava is a
   connected data source, not a login, per [ADR 0011](../adr/0011-identity-provider-signup.md));
   enterprise identity would warrant Keycloak ([ADR 0009](../adr/0009-identity-spring-security.md)).
+- **No immediate access-token revocation** — no per-request `jti` denylist; logout and bans leave up
+  to 15 minutes of residual access ([ADR 0013](../adr/0013-access-and-refresh-tokens.md) §5).
+- **No Backend-for-Frontend** — tokens reach the browser (access token in memory, refresh token in an
+  `HttpOnly` cookie); a BFF is the stronger posture, deferred unless XSS-driven token theft becomes
+  unacceptable ([ADR 0012](../adr/0012-spa-mobile-stateless-api.md)).
 - **No full GDPR self-service** (export/erase endpoints) — transactional deletion exists; self-service
   tooling is post-MVP.
 
@@ -140,4 +179,5 @@ hardening path (envelope encryption, KMS) documented.
 - [token-management.md](../technical-notes/token-management.md) — token lifecycle, audit
 - [webhooks.md](../integrations/strava/webhooks.md) — the webhook trust model
 - [observability.md](observability.md) — security-signal logging/alerting
-- [ADR 0003](../adr/0003-token-storage-strategy.md), [ADR 0009](../adr/0009-identity-spring-security.md)
+- [ADR 0003](../adr/0003-token-storage-strategy.md), [ADR 0009](../adr/0009-identity-spring-security.md),
+  [ADR 0012](../adr/0012-spa-mobile-stateless-api.md), [ADR 0013](../adr/0013-access-and-refresh-tokens.md)

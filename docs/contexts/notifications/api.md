@@ -27,7 +27,7 @@ Accept: text/event-stream
 - The controller creates an `SseEmitter` and registers it in the in-memory
   `Map<UserId, List<SseEmitter>>` (a user may hold several — multiple tabs/devices).
 - Each pushed message: `event: <NotificationType>`, `id: <dedupKey>`, `data: <rendered JSON>`.
-- The browser's `EventSource` reconnects automatically and sends `Last-Event-ID`.
+- Clients open the stream with a fetch-based SSE client (the native `EventSource` cannot send the `Authorization` header — [ADR 0012](../../adr/0012-spa-mobile-stateless-api.md)); it reconnects automatically, refreshing the access token first if needed, and sends `Last-Event-ID`.
 - A periodic heartbeat comment (`:\n\n`) keeps idle connections alive through proxies.
 - Behind nginx: `X-Accel-Buffering: no`, buffering off.
 

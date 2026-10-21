@@ -1,78 +1,70 @@
-# ADR 0009: Identity via Spring Security with own JWT issuer (supersedes ADR 0002)
+# ADR 0009: Identity in-app with Spring Security and our own JWT issuer
 
 - **Status:** Accepted
 - **Date:** 2026-06-14
-- **Supersedes:** [ADR 0002](0002-identity-model-superseded.md)
-- **Amended by:** [ADR 0011](0011-identity-provider-signup.md) — the mechanism decided here (Spring Security OAuth2 client + our own RS256 JWT issuer, no external identity server) is unchanged; the **provider** changed from Strava to Google (OIDC).
-
-> **Note (ADR 0011).** Everything below about *how* identity works still holds: Spring Security does the OAuth flow, we mint our own JWT, there is no Keycloak. What changed is *who authenticates the user*. This ADR assumed Strava login; [ADR 0011](0011-identity-provider-signup.md) moves sign-in to an OIDC identity provider (Google) and reduces Strava to a data source connected on demand. The reasoning below about Strava being "OAuth 2.0, not OIDC" is exactly why — read it as an argument that survived and was followed to its conclusion.
-
+- **Revised:** 2026-10-19 — login mechanism and token lifecycle aligned with [ADR 0012](0012-spa-mobile-stateless-api.md) and [ADR 0013](0013-access-and-refresh-tokens.md)
+- **Replaces:** [ADR 0002](../archived/adr/0002-identity-model-superseded.md) (archived — Keycloak with a custom Authenticator SPI)
+- **Related:** [ADR 0011](0011-identity-provider-signup.md) (who authenticates the user), [ADR 0012](0012-spa-mobile-stateless-api.md) (how clients log in), [ADR 0013](0013-access-and-refresh-tokens.md) (token lifecycle)
 
 ## Context
 
-[ADR 0002](0002-identity-model-superseded.md) decided that identity would be issued by **Keycloak**, bridged to Strava via a **custom Keycloak Authenticator SPI**. On review, that decision was reconsidered.
+Aperitivo needs an identity layer that does three things: establish who the user is through an external identity provider, keep a minimal account of its own, and authenticate every API request.
 
-Aperitivo's login is **passwordless**: every user authenticates by completing a Strava OAuth flow. There is no password, no email/password registration, no "forgot password" in the MVP. This makes most of Keycloak's feature surface inapplicable:
+Login is **passwordless**. A user proves who they are through an identity provider (Google, [ADR 0011](0011-identity-provider-signup.md)); Aperitivo never handles a password. That makes most of a full identity server's feature set inapplicable:
 
-- **Password reset** — N/A (no passwords).
-- **Email verification** — N/A (Strava already verified the user's email).
-- **Login themes** — N/A (the login UI is ours; the only login button redirects to Strava).
-- **MFA** — not in MVP scope, and in a passwordless-OAuth flow it would itself require custom Keycloak Authentication Flow configuration, i.e. not free out of the box.
+- **Password reset, password policies, credential storage:** not applicable, there are no passwords.
+- **Email verification:** the identity provider asserts `email_verified`.
+- **Login themes and hosted login pages:** the only login UI is the provider's sign-in button in our own client.
+- **MFA:** delegated to the identity provider's account security. It is not an MVP requirement of ours.
 
-What we actually need from an identity layer in the MVP is narrow: issue a standard JWT, store a minimal user account, and support logout/session invalidation. Keycloak brings a separate service, a separate database, an Admin API integration, and a version-sensitive custom SPI — to deliver that narrow need.
-
-Meanwhile Strava is **OAuth 2.0, not OIDC**, so Keycloak Identity Brokering (federation) works poorly, and the only clean Keycloak integration was the custom Authenticator SPI — the most code-heavy option.
+What remains is narrow: verify a provider assertion, provision or resolve a `User`, issue a standard token, and validate it on every request. An identity server (Keycloak or similar) would bring a separate service, a separate database and an admin integration to deliver that narrow need.
 
 ## Decision
 
-**Remove Keycloak. Implement identity with Spring Security 6 and our own JWT issuer.**
+**Identity lives inside the application. Spring Security verifies identity-provider assertions and validates our tokens, and we issue our own RS256-signed JWTs. There is no external identity server.**
 
-- **Strava login** is handled by Spring Security's OAuth2 client (`oauth2Login()` / OAuth2 client support), with a custom `OAuth2UserService` that processes the Strava callback.
-- **User provisioning**: on first successful Strava OAuth, create a `User` (internal UUID) in our database, keyed off `strava_athlete_id` via the `ConnectedSource` (see [ADR 0004](0004-user-model-and-connected-sources.md)); on subsequent logins, resolve the existing user.
-- **JWT issuance**: a Spring Security `JwtEncoder` (RS256) signs our own JWT. Claims are minimal: `sub` = internal `user_id` (UUID), `iss` = our domain, `iat`, `exp` (24–72h), `jti`.
-- **JWT validation**: BCs act as a Spring Security resource server validating our JWT against our public key (JWKS endpoint optional for production).
-- **Logout / revocation**: optional in MVP via a `jti` blacklist in Redis with TTL equal to the token's remaining lifetime. With short-lived tokens, MVP can also defer revocation.
+- **Verifying the identity provider.** The client obtains an OIDC ID token from the identity provider, and the backend verifies it with Spring Security's JOSE support (`NimbusJwtDecoder`, `OidcIdTokenValidator`). The exact login flow is [ADR 0012](0012-spa-mobile-stateless-api.md).
+- **Provisioning.** A verified `(issuer, sub)` resolves the existing `User` or creates a new one. The internal `user_id` is a UUID that holds nothing provider-specific ([ADR 0004](0004-user-model-and-connected-sources.md), [ADR 0011](0011-identity-provider-signup.md)).
+- **Token issuance.** A Spring Security `JwtEncoder` signs our access tokens with **RS256**. Claims are minimal: `sub` is the internal `user_id`, plus `iss`, `aud`, `iat`, `exp` and `jti`. Lifetimes, refresh tokens and logout are [ADR 0013](0013-access-and-refresh-tokens.md).
+- **Token validation.** The application is a Spring Security **resource server** that validates our JWT against our public key. Bounded contexts see only a `CurrentUser` principal. A JWKS endpoint publishes the public key for any separately deployed validator.
+- **RS256 rather than HS256.** Validation needs only the public key, so other components (and, later, separately deployed services) can verify tokens without holding the signing key.
 
-The separation of concerns from ADR 0002 is preserved and even simplified:
-- **Identity tokens (our JWT):** issued by us via Spring Security, used everywhere inside Aperitivo for authorization.
-- **Data tokens (Strava access/refresh):** stored by us, used only by Activity Ingestion via the IAM `TokenManager` (see [ADR 0003](0003-token-storage-strategy.md)).
-- **OAuth flow with Strava:** handled by our backend.
+Identity tokens and data tokens stay separate:
+- **Identity tokens (ours):** issued by us and used for every authorization decision inside Aperitivo.
+- **Data tokens (Strava access and refresh):** stored by us, encrypted, and used only by Activity Ingestion through IAM's `TokenManager` ([ADR 0003](0003-token-storage-strategy.md)).
 
-The JWT we emit is a standard OIDC-style JWT, so the choice of issuer is an internal detail invisible to API consumers.
+The JWT we emit is a standard OIDC-style JWT, so which component issues it is an internal detail invisible to API consumers.
 
 ## Alternatives considered
 
-- **Keycloak + custom Authenticator SPI (the superseded ADR 0002 decision).** Rejected on review: most Keycloak features are inapplicable to passwordless Strava login; the SPI is the most code-heavy integration (~300–500 lines of version-sensitive code) and a niche skill relative to the target role; and it adds a whole service + database + Admin API integration to deliver a narrow need.
-- **Keycloak Identity Brokering (Strava as federated IdP).** Rejected: Strava is OAuth 2.0, not OIDC; federation is awkward and would still need custom handling. (Already analyzed in ADR 0002 and ADR 0003.)
-- **SaaS identity (Auth0, Clerk, Supabase Auth).** Rejected: vendor lock-in on a portfolio project, weak open-source fit (Apache 2.0), limited showcase value, and Strava is not a first-class provider in these platforms anyway.
-- **Other self-hosted IdPs (Ory, Authentik, Authelia).** Rejected: same "extra service" cost as Keycloak with less maturity and weaker showcase value.
+- **Keycloak with a custom Authenticator SPI** (the archived [ADR 0002](../archived/adr/0002-identity-model-superseded.md)). Rejected: most Keycloak features do not apply to passwordless provider login; the SPI is the most code-heavy integration (version-sensitive custom code); and it adds a whole service, a database and an Admin API integration for a narrow need.
+- **Keycloak identity brokering** (the provider federated into Keycloak, Keycloak issuing our tokens). Rejected for the MVP: the same extra service and database, for a single identity provider.
+- **SaaS identity (Auth0, Clerk, Supabase Auth).** Rejected: vendor lock-in on a portfolio project, weak open-source fit, and limited showcase value.
+- **Other self-hosted identity providers (Ory, Authentik, Authelia).** Rejected: the same extra-service cost as Keycloak, with less maturity.
+- **Spring Authorization Server** (standard `/oauth2/token` endpoints with refresh grants, the identity provider upstream). Rejected for the MVP: a full authorization server for one first-party client family. Revisit if third-party clients appear ([ADR 0012](0012-spa-mobile-stateless-api.md)).
 
 ## Consequences
 
 **Positive:**
-- One fewer service (Keycloak) and one fewer database in the stack — significant for a single-VPS deployment.
-- Roughly 600–800 fewer lines of identity code (no custom SPI, no realm automation, no Admin API client).
-- Full control over JWT structure and claims.
-- Simpler testing (no Keycloak Testcontainer; Spring Security test support only).
-- Deep, broadly transferable Spring Security 6 / OAuth2 / JWT-issuer knowledge — well aligned with the target staff-level role.
+- One fewer service and database in the stack, which is significant for a single-VPS deployment.
+- Full control over token structure, claims and lifetimes.
+- Simpler testing: Spring Security test support only, no identity-server Testcontainer.
+- Deep, transferable Spring Security, OAuth 2.0, OIDC and JWT-issuer knowledge, which is the portfolio goal.
 
 **Negative:**
-- We give up the custom Keycloak SPI as a portfolio artifact. (Compensated by Spring Security depth and, later, envelope-encryption/JWKS key-rotation work — see [ADR 0003](0003-token-storage-strategy.md) and the token-management technical note.)
-- We own key management for the JWT signing key (RS256). Mitigation: env-sourced key in MVP, KMS/Vault-backed in production.
-- Adding Google/Apple/email identity later means adding Spring Security `ClientRegistration`s and callback handling in our code rather than configuring an IdP in an admin console — more code, but all in one place and easy to test.
+- **We own the signing key** (RS256). Mitigation: an environment-sourced key in the MVP; KMS or Vault custody and `kid`-based rotation later ([jwt-and-keys.md](../technical-notes/jwt-and-keys.md)).
+- **Adding identity providers is code**: a verifier per provider, rather than configuration in an admin console. It all lives in one place and is easy to test.
+- **We own the token endpoints** (`/api/auth/*`) instead of getting them from an authorization server ([ADR 0013](0013-access-and-refresh-tokens.md)).
 
 **Risks:**
-- A future need for enterprise identity (B2B SSO, corporate IdP federation, full MFA) genuinely warrants Keycloak. Mitigation: because we emit a standard OIDC-style JWT, the issuer can be swapped to Keycloak later **without breaking API consumers** — they cannot tell which component minted the token.
-
-**Follow-ups:**
-- [ADR 0003](0003-token-storage-strategy.md) updated: data-token storage no longer references Keycloak federation as an alternative.
-- [ADR 0004](0004-user-model-and-connected-sources.md) updated: user provisioning no longer routes through a Keycloak Authenticator SPI.
-- Identity & Access deep dive to detail the OAuth2 client config, `JwtEncoder` setup, and key handling.
+- **A future need for enterprise identity** (B2B SSO, corporate IdP federation, full MFA) genuinely warrants an identity server. Mitigation: we emit a standard OIDC-style JWT, so the issuer can be swapped later **without breaking API consumers**.
 
 ## References
 
-- [ADR 0002: Identity model (superseded)](0002-identity-model-superseded.md)
 - [ADR 0003: Token storage strategy](0003-token-storage-strategy.md)
 - [ADR 0004: User model and ConnectedSource](0004-user-model-and-connected-sources.md)
-- [Spring Security — OAuth2 Client](https://docs.spring.io/spring-security/reference/servlet/oauth2/client/index.html)
-- [Spring Security — JWT / JOSE support](https://docs.spring.io/spring-security/reference/servlet/oauth2/resource-server/jwt.html)
+- [ADR 0011: Identity-provider signup](0011-identity-provider-signup.md)
+- [ADR 0012: SPA and mobile clients; stateless API with ID-token login](0012-spa-mobile-stateless-api.md)
+- [ADR 0013: Short-lived access tokens with rotating refresh tokens](0013-access-and-refresh-tokens.md)
+- [jwt-and-keys.md](../technical-notes/jwt-and-keys.md)
+- [Spring Security — Resource Server JWT](https://docs.spring.io/spring-security/reference/7.0/servlet/oauth2/resource-server/jwt.html)

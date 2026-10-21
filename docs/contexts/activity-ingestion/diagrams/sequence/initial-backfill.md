@@ -3,12 +3,11 @@
 How a newly connected Strava source gets its **full activity history** pulled in, starting
 from the `IntegrationConnectedEvent` IAM publishes when a source becomes `ACTIVE`.
 
-That event now originates from the **connect flow** — an already-authenticated user linking a
-data source (`GET /connect/strava`), **not** signup or login. Since
-[ADR 0011](../../../../adr/0011-identity-provider-signup.md), signup/login is Google and creates no
-data; `IntegrationConnectedEvent` is the **sole** trigger for backfill, and a newly registered user
-has no activity history until they connect a source. What Ingestion consumes is unchanged — it reacts
-to the event and never cares which flow produced it.
+That event originates from the **connect flow** — an already-authenticated user linking a
+data source (client-driven connect → `POST /api/connect/strava`, [ADR 0012](../../../../adr/0012-spa-mobile-stateless-api.md)), **not** signup or login. Signup/login is Google and creates no
+data ([ADR 0011](../../../../adr/0011-identity-provider-signup.md)); `IntegrationConnectedEvent` is the **sole** trigger for backfill, and a newly registered user
+has no activity history until they connect a source. Ingestion reacts to the event and never cares which
+flow produced it.
 
 Backfill is one of the three sources of ingestion work. Unlike the webhook channel, it
 **bypasses the `WebhookEvent` inbox** — there is no Strava push to record, so no inbox row

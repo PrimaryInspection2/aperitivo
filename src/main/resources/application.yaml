@@ -110,6 +110,10 @@ aperitivo:
       api:
         url: https://www.strava.com/api/v3
   identity:
+    jwt:
+      public-key: ${JWT_PUBLIC_KEY}
+      private-key: ${JWT_PRIVATE_KEY}
+      key-id: ${JWT_KEY_ID}
     login:
       registration-id: ${IAM_LOGIN_REGISTRATION_ID:google}
     encryption:

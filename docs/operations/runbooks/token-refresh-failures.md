@@ -37,7 +37,7 @@ Many users' Strava token refreshes are failing at once. If unaddressed, their `C
 ## Resolve
 
 - Real revocations resolve themselves (user reconnects the Strava source via the connect flow —
-  `GET /connect/strava`, not a re-login, since Strava is no longer a login provider
+  the SPA's Connect Strava button → `POST /api/connect/strava`, not a re-login, since Strava is not a login provider
   ([ADR 0011](../../adr/0011-identity-provider-signup.md)) — yielding a fresh `ConnectedSource`).
   Systemic causes (clock, Strava outage) resolve when the root cause is fixed; no per-user action needed.
 

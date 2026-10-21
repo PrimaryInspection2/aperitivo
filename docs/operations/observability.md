@@ -33,7 +33,9 @@ Consolidated from each BC's own observability section.
 - `token_refresh_total`, `token_refresh_failures_total`, `token_refresh_latency` (histogram)
 - `connected_sources{status}` gauge (ACTIVE / REVOKED / ERROR counts)
 - `tokens_expiring_soon` gauge
-- JWT issued / validation-failure counts (by reason: expired / bad-sig / blacklisted)
+- Access tokens issued / validation-failure counts (by reason: expired / bad-sig / wrong-aud)
+- Refresh outcomes (rotated / expired / reuse-detected → family revoked); a spike in reuse detection is a token-theft signal ([ADR 0013](../adr/0013-access-and-refresh-tokens.md))
+- Google ID-token verification failures (by reason)
 
 ### Activity Ingestion (the operationally hottest BC)
 - `strava_ratelimit_short_used` / `_daily_used` gauges (from `X-RateLimit-Usage` — authoritative)

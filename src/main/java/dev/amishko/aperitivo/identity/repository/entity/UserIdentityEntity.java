@@ -49,6 +49,9 @@ public class UserIdentityEntity implements Persistable<UUID> {
     @Column(name = "provider_user_id", nullable = false, updatable = false)
     private String providerUserId;
 
+    @Column(name = "last_login_at")
+    private Instant lastLoginAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     @CreationTimestamp
     @Setter(AccessLevel.NONE)

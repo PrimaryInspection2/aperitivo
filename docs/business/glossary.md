@@ -30,15 +30,15 @@ DDD principle: when the same word means different things in different Bounded Co
 
 **ConnectedSource** — a credentialed link from a User to an external data provider (currently Strava). Each ConnectedSource has its own lifecycle (`ACTIVE`, `REVOKED`, `ERROR`) and holds the OAuth tokens for that provider. A User has **0 or more** ConnectedSources — zero is the normal state of a freshly signed-up account, and the permanent state of a user who never connects anything.
 
-**Identity Provider (IdP)** — an external system that **authenticates** the User and tells us who they are. MVP: `GOOGLE` (OIDC). Future: Apple, Facebook. Produces a `UserIdentity`. Identity *tokens* are issued by Aperitivo itself (Spring Security), not by an external identity server — the IdP establishes who the user is; we mint the JWT.
+**Identity Provider (IdP)** — an external system that **authenticates** the User and tells us who they are. MVP: `GOOGLE` (OIDC). Future: Apple, Facebook. Produces a `UserIdentity`. Identity *tokens* are issued by Aperitivo itself (Spring Security), not by an external identity server — the IdP's ID token establishes who the user is, once, at login; we mint the access and refresh tokens.
 
 **Provider** — an external system Aperitivo integrates with as an OAuth-based, webhook-style **data source**. MVP: `STRAVA`. Realistic future candidates with similar token semantics: `GARMIN`, `WAHOO`, `COROS`, `SUUNTO`, `POLAR`, `TRAININGPEAKS`. Produces a `ConnectedSource`. (Mobile-native sources like Apple Health / Google Fit and file uploads like FIT/GPX/TCX have different semantics and are not modeled as Providers.)
 
 > **Identity Provider and Provider are different things and are never mixed.** An IdP answers *"who is this?"*; a Provider answers *"where does their training data come from?"*. Strava is a Provider and **not** an IdP — it is plain OAuth 2.0 with no ID token and no email in the default scope, so it cannot establish an account identity. They are modeled as two enums (`IdentityProvider`, `Provider`) and two tables (`user_identities`, `connected_sources`) precisely so the compiler and the schema keep them apart. See [ADR 0011](../adr/0011-identity-provider-signup.md).
 
-**Login flow** — the browser OAuth flow that **signs a user in**, run against an Identity Provider by an *anonymous* caller (Spring Security `oauth2Login`). Creates the `User` and `UserIdentity`. Never touches `connected_sources`.
+**Login flow** — the flow that **signs a user in**, run by an *anonymous* caller: the client obtains a Google **ID token** itself (Google Identity Services on the web, the native SDK on mobile) and exchanges it at `POST /api/auth/google`; IAM verifies it, resolves or creates the `User` and `UserIdentity`, and issues an access token and a refresh token. No server-side redirect and no session. Never touches `connected_sources`. See [ADR 0012](../adr/0012-spa-mobile-stateless-api.md).
 
-**Connect flow** — the browser OAuth flow that **attaches a data source**, run against a Provider by an *already-authenticated* caller (Spring Security `oauth2Client`). Creates or reactivates a `ConnectedSource`. Never signs anyone in and never changes who is logged in — the `user_id` comes from our own JWT.
+**Connect flow** — the OAuth authorization-code flow that **attaches a data source**, run against a Provider by an *already-authenticated* caller. **Client-driven:** the SPA sends the user to the Provider, receives the callback on its own route and verifies `state`; it then posts the code to `POST /api/connect/{provider}` with its access token, and IAM exchanges the code server-side with the `client_secret`. Creates or reactivates a `ConnectedSource`. Never signs anyone in and never changes who is logged in — the `user_id` comes from our own access token. See [ADR 0012](../adr/0012-spa-mobile-stateless-api.md).
 
 **TokenManager** — the single component in the IAM BC with permission to read, refresh, and invalidate Strava (and future provider) tokens. No other code in the system touches encrypted token storage directly. Identity Providers contribute no tokens, so nothing in `user_identities` passes through it.
 
@@ -46,7 +46,13 @@ DDD principle: when the same word means different things in different Bounded Co
 
 **Revocation** — a state in which a ConnectedSource is no longer usable. Triggered by the Strava API returning 401, by Strava's deauthorization webhook, or by the user disconnecting the source in-app. Causes the `IntegrationRevoked` event. Revoking a source never affects the user's ability to log in.
 
-**JWT** — the identity token Aperitivo issues for an authenticated user (Spring Security `JwtEncoder`, RS256). Claims are minimal: `sub` = `user_id`, `iss`, `iat`, `exp`, `jti`. Contains no provider identifiers and no Strava tokens. Note that `sub` is overloaded in the wider OAuth world: **our** JWT's `sub` is the internal `user_id`; a **provider's** `sub` is stored as `provider_user_id`. They are never the same value.
+**JWT** — the format of the **access token** Aperitivo issues for an authenticated user (Spring Security `JwtEncoder`, RS256). Claims are minimal: `sub` = `user_id`, `iss`, `aud`, `iat`, `exp`, `jti`. Contains no provider identifiers and no Strava tokens. Note that `sub` is overloaded in the wider OAuth world: **our** JWT's `sub` is the internal `user_id`; a **provider's** `sub` is stored as `provider_user_id`. They are never the same value.
+
+**Access token** — our short-lived (15-minute) JWT, returned in the JSON body of login and refresh and sent on every API call as `Authorization: Bearer`. Validated by signature alone, with no lookup; the SPA keeps it in memory. Not to be confused with a Provider's access token (Strava's, held by `TokenManager`) or a Google token, which is never accepted by our API. See [ADR 0013](../adr/0013-access-and-refresh-tokens.md).
+
+**Refresh token** — an opaque random value whose only use is to obtain a new access token at `POST /api/auth/refresh`. Stored by IAM only as a hash; on the web it travels in an `HttpOnly` cookie scoped to `/api/auth`. **Rotated** on every use: the presented token is spent and a new one issued. Distinct from a Provider's refresh token (Strava's, held by `TokenManager`). See [ADR 0013](../adr/0013-access-and-refresh-tokens.md).
+
+**Token family** — the chain of refresh tokens descending from one sign-in on one device. Presenting an already-spent token from a family (reuse) revokes the whole family; logout revokes the current family, "log out everywhere" all of the user's families. A family has an absolute lifetime, after which the user signs in again. See [ADR 0013](../adr/0013-access-and-refresh-tokens.md).
 
 
 ---
@@ -87,7 +93,7 @@ Note: a `Workout` corresponds 1:1 to a Strava activity in MVP, but the model doe
 
 **Route (polyline)** — the GPS track of a Workout, stored as Strava's **encoded polyline string** (`mapPolyline`) on the `Workout`. Whole-read for map rendering; it is *not* modeled as a per-point relational collection, and the numeric per-second streams live in Analytics, not here.
 
-> Removed from this BC's language: "Split" (now `Lap`), "Stream" (tier-3, owned by Performance Analytics — see below), "Effort (future)" (now the concrete `SegmentEffort` / `BestEffort`).
+> Not part of this BC's language: "Split" (use `Lap`), "Stream" (tier-3, owned by Performance Analytics — see below), "Effort" (use the concrete `SegmentEffort` / `BestEffort`).
 
 ---
 

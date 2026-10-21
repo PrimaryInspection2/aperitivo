@@ -38,8 +38,8 @@ flowchart TB
 | From | To | Nature |
 |---|---|---|
 | Athlete → Aperitivo | HTTPS (browser/app) | sign in via Google, connect Strava, view fitness/form/PRs, author training plans |
-| Aperitivo → Google | OIDC (OAuth 2.0) | login / signup — the identity provider; supplies no activity data |
-| Aperitivo → Strava | OAuth 2.0 + REST | connect the data source, fetch activity detail & streams, refresh tokens — all **server-to-server** (confidential client) |
+| Aperitivo → Google | OIDC | login / signup — the Aperitivo client obtains a Google ID token, the backend verifies it ([ADR 0012](../../adr/0012-spa-mobile-stateless-api.md)); supplies no activity data |
+| Aperitivo → Strava | OAuth 2.0 + REST | connect the data source (consent in the browser; code exchange **server-to-server**, confidential client), fetch activity detail & streams, refresh tokens |
 | Strava → Aperitivo | Webhooks (HTTPS POST) | realtime activity create/update/delete + athlete deauthorization |
 | Aperitivo → Athlete | Email + SSE | PR notifications, session reminders, reconnect prompts |
 

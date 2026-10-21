@@ -90,18 +90,22 @@ FlywayException: Found more than one migration with version 4
 
 ## Крок 2 — Довести `V4` до схеми з `database.md`
 
-Міграція створює таблицю **без жодного констрейнта**, хоча `database.md` описує три. Це не
-косметика: `handleLogin` робить read-then-insert без захисту, тож два паралельні перші
+Спершу міграція створювала таблицю **без жодного `UNIQUE`**, хоча `database.md` їх описує.
+Це не косметика: `handleLogin` робить read-then-insert без захисту, тож два паралельні перші
 логіни того самого Google-акаунта створять **два `UserEntity`** — рівно той дубль, проти
-якого написана ADR 0011.
+якого написана ADR 0011. Обидва `UNIQUE` уже додано в `V4`; решта — у чеклісті нижче.
 
 | Документовано в `database.md` | Є в `V4` |
 |---|---|
-| `uq_user_identities_provider_identity (provider, provider_user_id)` | ❌ |
-| `uq_user_identities_user_provider (user_id, provider)` | ❌ |
-| `ix_user_identities_user (user_id)` | ❌ |
-| `last_login_at TIMESTAMPTZ NULL` | ❌ |
+| `uq_user_identities_provider_user_id_provider (provider_user_id, provider)` | ✅ |
+| `uq_user_identities_user_id_provider (user_id, provider)` | ✅ |
+| `last_login_at TIMESTAMPTZ NULL` | ✅ |
 | `updated_at` — **відсутній** у доці | ⚠️ є в міграції та в entity |
+
+Окремий `ix_user_identities_user (user_id)` **не потрібен**: `user_id` — провідна колонка
+`uq_user_identities_user_id_provider`, яка обслуговує і пошук за `user_id`, і FK-перевірку
+при видаленні юзера (сам FK індекс не створює). Якщо цей констрейнт колись приберуть —
+індекс на `user_id` треба повернути.
 
 ### 📖 Читати перед кроком
 
@@ -113,7 +117,7 @@ FlywayException: Found more than one migration with version 4
 
 ### Кроки
 
-- [ ] Додати обидва unique-констрейнти та індекс у `V4` (міграція ще не застосована ніде — правити її на місці законно, окремої `V5` не треба).
+- [x] Додати обидва unique-констрейнти у `V4` (міграція ще не застосована ніде — правити її на місці законно, окремої `V5` не треба). Окремий індекс на `user_id` не потрібен — див. примітку під таблицею вище.
 - [ ] Вирішити розбіжність `last_login_at` vs `updated_at`: або міграція+entity доганяють доку, або доку виправити. Обрати **одне** і зробити консистентним у трьох місцях, де `lastLoginAt` уже описаний ([`domain-model.md`](../contexts/identity-access/domain-model.md), [`api.md`](../contexts/identity-access/api.md), [`google-login.md`](../contexts/identity-access/diagrams/sequence/google-login.md)).
 - [ ] Реалізувати гілку returning-user у сервісі логіну — зараз вона не пише нічого.
 - [ ] Обробити гонку first-login по pattern 2 (не покладатись на те, що «навряд чи станеться»).

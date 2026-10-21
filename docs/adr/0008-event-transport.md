@@ -5,7 +5,7 @@
 
 ## Context
 
-Aperitivo is event-driven: Bounded Contexts communicate through domain events (`ActivityIngested` → `WorkoutCreated` → `PersonalRecordSet`/`SessionCompleted` → notifications). The earlier documentation implicitly assumed Apache Kafka as the event transport, but the choice was never explicitly justified in an ADR.
+Aperitivo is event-driven: Bounded Contexts communicate through domain events (`ActivityIngested` → `WorkoutCreated` → `PersonalRecordSet`/`SessionCompleted` → notifications). Apache Kafka is the default many teams reach for as the transport for such events; this ADR decides the transport explicitly rather than by assumption.
 
 This ADR makes the decision explicit.
 

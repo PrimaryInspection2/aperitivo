@@ -2,18 +2,15 @@
 
 - **Status:** Accepted
 - **Date:** 2026-05-20
-- **Reviewed:** 2026-06-14 (Keycloak references removed; alternatives strengthened; decision unchanged)
-- **Amended by:** [ADR 0011](0011-identity-provider-signup.md) — the separation decided here is retained and made structural: sign-in methods moved out of `ConnectedSource` into a dedicated `UserIdentity` (`user_identities`), and a `User` may now exist with **zero** connected sources.
-
-> **Note (ADR 0011).** This ADR's core decision — an internal `user_id` UUID, with provider linkage in a separate entity — is unchanged and was vindicated. What changed is that the "additional identity providers" extension point anticipated below is now **exercised**: identity comes from an OIDC provider (Google) recorded in `user_identities`, while `ConnectedSource` narrows to its data-access role only. Read the paragraphs below about *identity providers* as describing `UserIdentity`; `ConnectedSource` statements still hold for data sources.
-
+- **Revised:** 2026-10-19 — provisioning and sign-in methods aligned with [ADR 0011](0011-identity-provider-signup.md)
+- **Related:** [ADR 0011](0011-identity-provider-signup.md) (sign-in methods in `user_identities`; data sources connected on demand)
 
 ## Context
 
-Aperitivo's MVP is Strava-only: every user signs in with Strava, every data fetch is from Strava. The simplest possible user model would use `strava_athlete_id` as the primary key throughout the system.
+Aperitivo's MVP fetches all data from Strava. The simplest possible user model would use `strava_athlete_id` as the primary key throughout the system.
 
-However, we want to preserve the option to extend the system later — without forcing a painful database migration — for:
-- **Additional identity providers** (Google, Apple, email/password).
+However, the system must extend — without a painful database migration — to:
+- **Identity providers that are not data sources** (Google today, Apple later — [ADR 0011](0011-identity-provider-signup.md)).
 - **Additional data sources** (Garmin Connect, Wahoo, COROS, Suunto, Polar, TrainingPeaks).
 - **Coach-style use cases** (one identity, multiple athletes' data sources).
 
@@ -29,7 +26,7 @@ The economics are well understood: schema migrations on a populated production d
 User
   id (UUID, PK)
   display_name
-  email (nullable; future: required for non-Strava IdPs)
+  email (nullable)
   created_at, updated_at
 
 ConnectedSource
@@ -51,9 +48,9 @@ ConnectedSource
 
 The `provider` enum covers **OAuth-based, webhook-style partners** (Strava today; Garmin, Wahoo, COROS, Suunto, Polar, TrainingPeaks are realistic future candidates with similar token semantics). Mobile-native sources (Apple Health, Google Fit) and file uploads (FIT/GPX/TCX) have different semantics — no per-user OAuth token lifecycle — and are deliberately **not** modeled through this enum; if needed, they get their own representation.
 
-Cardinality in MVP: each `User` has exactly one `ConnectedSource` (Strava). The schema allows N; application logic in MVP creates exactly one.
+Cardinality: a `User` has zero or more `ConnectedSource` rows. In the MVP the connect flow creates at most one (Strava); a newly registered user has none.
 
-User provisioning: on first successful Strava OAuth, Spring Security's callback handler creates the `User` and its `ConnectedSource` (see [ADR 0009](0009-identity-spring-security.md)); subsequent logins resolve the existing `User` via `UNIQUE (provider, provider_user_id)`.
+**`ConnectedSource` is for data access only.** How a user signs in is a separate entity, `UserIdentity` in `user_identities`, keyed by `(issuer, sub)` ([ADR 0011](0011-identity-provider-signup.md)). A `User` is provisioned on first login through an identity provider, and a `ConnectedSource` is created later, by the connect flow.
 
 ## Alternatives considered
 
@@ -65,7 +62,7 @@ User provisioning: on first successful Strava OAuth, Spring Security's callback 
 ## Consequences
 
 **Positive:**
-- Adding a new identity provider later: add a Spring Security `ClientRegistration` and a "Connect a data source" step for non-Strava signups — no DB migration.
+- Adding a new identity provider later: a new `UserIdentity` provider value plus an ID-token verifier ([ADR 0011](0011-identity-provider-signup.md), [ADR 0012](0012-spa-mobile-stateless-api.md)) — no DB migration.
 - Adding a new data source later: add a `provider` enum value plus a provider-specific OAuth adapter and webhook handler — no DB migration.
 - Coach use case (future): one `User` linked to multiple `ConnectedSource` rows (different cardinality, same model).
 - `User` is decoupled from any single external system — internal `user_id` is the lingua franca for all events, FKs, and APIs.
@@ -84,4 +81,5 @@ User provisioning: on first successful Strava OAuth, Spring Security's callback 
 ## References
 
 - [ADR 0003: Token storage strategy](0003-token-storage-strategy.md)
-- [ADR 0009: Identity via Spring Security](0009-identity-spring-security.md)
+- [ADR 0009: Identity in-app with Spring Security and our own JWT issuer](0009-identity-spring-security.md)
+- [ADR 0011: Identity-provider signup](0011-identity-provider-signup.md)

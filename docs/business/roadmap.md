@@ -25,11 +25,11 @@ Goal: project skeleton, infrastructure, walking skeleton.
 Goal: Google sign-in (login) plus the Strava connect flow (data source).
 
 - `User`, `UserIdentity`, and `ConnectedSource` schemas, repositories, encryption-at-rest converter
-- Google OIDC login via Spring Security (`oauth2Login`, `OidcUserService`) — the only login provider
-- Strava connect/link flow via Spring Security (`oauth2Client`; authorize, callback, code exchange, refresh) — does not touch the `SecurityContext`
-- Self-issued JWT (Spring Security `JwtEncoder`, RS256); resource-server validation
+- Google login by ID-token exchange (`POST /api/auth/google`) — the only login provider ([ADR 0012](../adr/0012-spa-mobile-stateless-api.md))
+- Strava connect, client-driven (SPA: authorize + `state`; backend: code exchange, refresh) — user from our bearer token
+- Self-issued 15-minute access JWT (Spring Security `JwtEncoder`, RS256) + rotating refresh tokens ([ADR 0013](../adr/0013-access-and-refresh-tokens.md)); one stateless resource-server chain
 - `TokenManager` component with concurrency-safe refresh
-- IAM REST endpoints: initiate Google login, callback, current user info; connect/disconnect data sources (`GET /connect/{provider}`, `GET /api/me/sources`, `DELETE /api/me/sources/{provider}`)
+- IAM REST endpoints: `POST /api/auth/google`, `/api/auth/refresh`, `/api/auth/logout`, current user info (`GET /api/me`); connect/disconnect data sources (`POST /api/connect/{provider}`, `GET /api/me/sources`, `DELETE /api/me/sources/{provider}`)
 - Deauthorization webhook handler
 - `UserRegistered` (login flow), `IntegrationConnected` (connect flow), `IntegrationRevoked` events published in-process
 
