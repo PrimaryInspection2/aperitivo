@@ -25,7 +25,7 @@ public record JWKProperties(RSAPublicKey publicKey, RSAPrivateKey privateKey, St
         if(issuer == null || issuer.isBlank()) {
             throw new IllegalArgumentException("aperitivo.identity.jwt.issuer must be non-blank");
         }
-        if(ttl == null || ttl < 0) {
+        if(ttl == null || ttl <= 0) {
             throw new IllegalArgumentException("aperitivo.identity.jwt.ttl must be non-blank and be greater than 0");
         }
     }

@@ -12,20 +12,29 @@ import dev.amishko.aperitivo.identity.config.properties.JWKProperties;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
-import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.*;
+
+import java.time.Duration;
+import java.util.List;
 
 @Configuration
 @RequiredArgsConstructor
-public class JWKConfig {
+public class AperitivoJWKConfig {
 
     private final JWKProperties JWKProperties;
 
     @Bean
     public JwtDecoder jwtDecoder() {
-        return NimbusJwtDecoder.withPublicKey(JWKProperties.publicKey()).build();
+        NimbusJwtDecoder jwtDecoder = NimbusJwtDecoder.withPublicKey(JWKProperties.publicKey()).build();
+        DelegatingOAuth2TokenValidator<Jwt> delegatingJwtValidator = new DelegatingOAuth2TokenValidator<>(
+                new JwtTimestampValidator(Duration.ofSeconds(5)),
+                new JwtAudienceValidator(JWKProperties.audience()),
+                new JwtIssuerValidator(JWKProperties.issuer()));
+
+        jwtDecoder.setJwtValidator(delegatingJwtValidator);
+        return jwtDecoder;
     }
 
     @Bean
