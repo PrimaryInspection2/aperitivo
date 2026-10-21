@@ -114,6 +114,8 @@ aperitivo:
       public-key: ${JWT_PUBLIC_KEY}
       private-key: ${JWT_PRIVATE_KEY}
       key-id: ${JWT_KEY_ID}
+      issuer: aperitivo.app
+      audience: aperitivo-api
     login:
       registration-id: ${IAM_LOGIN_REGISTRATION_ID:google}
     encryption:
