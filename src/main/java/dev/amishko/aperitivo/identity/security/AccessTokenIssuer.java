@@ -41,6 +41,7 @@ public class AccessTokenIssuer {
         Instant expiresAt = issuedAt.plus(15, ChronoUnit.MINUTES);
 
         return JwtClaimsSet.builder()
+                .id(UUID.randomUUID().toString())
                 .subject(String.valueOf(userId))
                 .issuedAt(issuedAt)
                 .expiresAt(expiresAt)
