@@ -1,4 +1,4 @@
-package dev.amishko.aperitivo.identity.security.util;
+package dev.amishko.aperitivo.identity.security;
 
 import dev.amishko.aperitivo.identity.config.AperitivoJWKConfig;
 import dev.amishko.aperitivo.identity.config.properties.JWKProperties;

@@ -1,4 +1,4 @@
-package dev.amishko.aperitivo.identity.security.util;
+package dev.amishko.aperitivo.identity.security;
 
 import dev.amishko.aperitivo.identity.util.cipher.AesGcmCipher;
 import dev.amishko.aperitivo.identity.util.cipher.EncryptionProperties;
