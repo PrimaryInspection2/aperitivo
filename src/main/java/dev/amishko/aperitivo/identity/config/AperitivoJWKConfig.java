@@ -6,6 +6,7 @@ import com.nimbusds.jose.jwk.JWK;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import com.nimbusds.jose.proc.SecurityContext;
 import dev.amishko.aperitivo.identity.config.properties.JWKProperties;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -35,17 +36,22 @@ public class AperitivoJWKConfig {
     }
 
     @Bean
-    JwtEncoder aperitivoJwtEncoder() {
-        return new NimbusJwtEncoder(new ImmutableJWKSet<>(new JWKSet(aperitivoJwk())));
+    public JwtEncoder aperitivoJwtEncoder() {
+        return new NimbusJwtEncoder(aperitivoJwkSet());
     }
 
     @Bean
-    JWK aperitivoJwk() {
+    public JWK aperitivoJwk() {
         return new RSAKey.Builder(JWKProperties.publicKey())
                 .privateKey(JWKProperties.privateKey())
                 .algorithm(JWSAlgorithm.RS256)
                 .keyID(JWKProperties.keyId())
                 .build();
+    }
+
+    @Bean
+    public ImmutableJWKSet<SecurityContext> aperitivoJwkSet() {
+        return new ImmutableJWKSet<>(new JWKSet(aperitivoJwk()));
     }
 
 }
