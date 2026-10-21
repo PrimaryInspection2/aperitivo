@@ -18,7 +18,7 @@ public class OAuth2ConfigurationController {
     private final ImmutableJWKSet<SecurityContext> aperitivoJwkSet;
 
     @GetMapping(value = "/.well-known/jwks.json", produces = APPLICATION_JSON_VALUE)
-    public ResponseEntity<Map<String, Object>> getPublicCertificate() {
+    public ResponseEntity<Map<String, Object>> getJwkSet() {
         return ResponseEntity.ok(aperitivoJwkSet
                 .getJWKSet()
                 .toPublicJWKSet()
