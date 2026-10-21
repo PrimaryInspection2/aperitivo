@@ -4,7 +4,6 @@ package dev.amishko.aperitivo.identity.security;
 import dev.amishko.aperitivo.identity.config.properties.JWKProperties;
 import dev.amishko.aperitivo.identity.dto.tokens.AccessTokenDto;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.stereotype.Service;
 
@@ -18,7 +17,6 @@ import static org.springframework.security.oauth2.jose.jws.SignatureAlgorithm.RS
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class AccessTokenIssuer {
 
     private final JWKProperties jwkProperties;
@@ -38,7 +36,7 @@ public class AccessTokenIssuer {
 
     private JwtClaimsSet buildClaims(UUID userId) {
         Instant issuedAt = Instant.now(clock);
-        Instant expiresAt = issuedAt.plus(15, ChronoUnit.MINUTES);
+        Instant expiresAt = issuedAt.plus(jwkProperties.ttl(), ChronoUnit.MINUTES);
 
         return JwtClaimsSet.builder()
                 .id(UUID.randomUUID().toString())
@@ -52,8 +50,8 @@ public class AccessTokenIssuer {
 
     private JwsHeader buildHeader() {
         return JwsHeader.with(RS256)
-                .header("typ", "JWT")
-                .header("kid", jwkProperties.keyId())
+                .keyId(jwkProperties.keyId())
+                .type("JWT")
                 .build();
     }
 }

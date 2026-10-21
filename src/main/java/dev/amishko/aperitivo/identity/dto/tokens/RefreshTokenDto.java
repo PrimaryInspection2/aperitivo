@@ -1,8 +1,10 @@
 package dev.amishko.aperitivo.identity.dto.tokens;
 
-import lombok.ToString;
-
 import java.time.Instant;
 
-public record RefreshTokenDto(@ToString.Exclude String token, Instant expiresAt) {
+public record RefreshTokenDto(String token, Instant expiresAt) {
+    @Override
+    public String toString() {
+        return "RefreshTokenDto{}";
+    }
 }

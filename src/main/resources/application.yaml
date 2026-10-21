@@ -116,6 +116,7 @@ aperitivo:
       key-id: ${JWT_KEY_ID}
       issuer: aperitivo.app
       audience: aperitivo-api
+      ttl: 15
     login:
       registration-id: ${IAM_LOGIN_REGISTRATION_ID:google}
     encryption:

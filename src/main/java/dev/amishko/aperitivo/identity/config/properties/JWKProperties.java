@@ -7,7 +7,7 @@ import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 
 @ConfigurationProperties(prefix = "aperitivo.identity.jwt")
-public record JWKProperties(RSAPublicKey publicKey, RSAPrivateKey privateKey, String keyId, String issuer, String audience) {
+public record JWKProperties(RSAPublicKey publicKey, RSAPrivateKey privateKey, String keyId, String issuer, String audience, Integer ttl) {
 
     public JWKProperties {
         if (publicKey == null) {
@@ -24,6 +24,9 @@ public record JWKProperties(RSAPublicKey publicKey, RSAPrivateKey privateKey, St
         }
         if(issuer == null || issuer.isBlank()) {
             throw new IllegalArgumentException("aperitivo.identity.jwt.issuer must be non-blank");
+        }
+        if(ttl == null || ttl < 0) {
+            throw new IllegalArgumentException("aperitivo.identity.jwt.ttl must be non-blank and be greater than 0");
         }
     }
 
