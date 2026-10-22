@@ -1,3 +1,4 @@
+
 # Identity & Access — план реалізації
 
 Робочий план BC **Identity & Access** під чинну модель:
@@ -6,7 +7,7 @@
 - [ADR 0012](../adr/0012-spa-mobile-stateless-api.md) — SPA і мобілка, логін обміном Google ID token, одна stateless chain, Strava connect, керований SPA;
 - [ADR 0013](../adr/0013-access-and-refresh-tokens.md) — access на 15 хв + ротований refresh.
 
-Стан «зроблено» звірено з гілкою `main` (коміт `328fd58`) 2026-10-19. Попередні версії плану (три редизайни) лежать в архіві: [identity-2026-10.md](../archived/plans/identity-2026-10.md), [identity-adr-0011.md](../archived/plans/identity-adr-0011.md). Нічого звідти не реалізовувати без звірки з цим файлом.
+Стан «зроблено» звірено з гілкою `main` (коміт `a77b09a`) 2026-10-22. Попередні версії плану (три редизайни) лежать в архіві: [identity-2026-10.md](../archived/plans/identity-2026-10.md), [identity-adr-0011.md](../archived/plans/identity-adr-0011.md). Нічого звідти не реалізовувати без звірки з цим файлом.
 
 ---
 
@@ -40,10 +41,10 @@
 - **AES-GCM:** `AesGcmCipher` (96-бітний nonce на кожне шифрування), `EncryptedBytesConverter`, `EncryptionProperties`; тести `AesGcmCipherTest`, `EncryptedBytesConverterTest`, `EncryptedBytesConverterIT`.
 - **TokenManager (Strava):** published-інтерфейс `TokenManager` (`markRevoked(userId, reason)` уже без `provider`); `StravaTokenManager` з lazy refresh, per-user Redis lock (`PerUserTokenRefreshLock`), `markRevoked` з guard-ом переходу і `IntegrationRevokedEvent`, аудит `recordSuccessfulUse`/`recordFailure` (`@Async("iamAuditTaskExecutor")`, обмежена черга, `try/catch` з логуванням усередині), `@Retryable` на `markRevoked`/`persistRefreshed` (`@EnableRetry`).
 - **Помилки OAuth Strava:** Feign-клієнти в окремих child-контекстах, `StravaOAuthClientErrorDecoder` → `OAuthBadRequestException` / `OAuthClientCredentialsException` / `OAuthTransientException` / `OAuthUnexpectedStatusException` у published surface; базовий `TransientException`; прихованого revoke в `getValidAccessToken` немає.
-- **Провіженінг логіну (частково):** `OAuth2GoogleLoginCallbackService.handleLogin` створює `User` + `UserIdentity` за `(provider, providerUserId)` і емітить `UserRegisteredEvent` для нового юзера; гілка returning user нічого не пише (крок 2).
-- **Тести:** Testcontainers Postgres + Redis (`BaseIT`); IT — `StravaTokenManagerIT`, `StravaTokenManagerRetryIT`, `StravaTokenStateServiceIT`, `PerUserTokenRefreshLockIT` / `…ConcurrencyIT`, `EncryptedBytesConverterIT`, `TransactionalEventDeliveryIT`, `IamAuditTaskExecutorIT`, `IdentityPropertiesBindingIT`; unit — `StravaOAuthClientErrorDecoderTest`, `AesGcmCipherTest`, `EncryptedBytesConverterTest`, `PerUserTokenRefreshLockUnitTest`, `TokenRefreshLockPropertiesTest`.
+- **Провіженінг логіну (частково):** `OAuth2GoogleLoginCallbackService.handleLogin` створює `User` + `UserIdentity` за `(provider, providerUserId)` і емітить `UserRegisteredEvent` для нового юзера; гілка returning user оновлює `lastLoginAt` (поки `Instant.now()`, не `Clock`).
+- **Тести:** Testcontainers Postgres + Redis (`BaseIT`); IT — `StravaTokenManagerIT`, `StravaTokenManagerRetryIT`, `StravaTokenStateServiceIT`, `PerUserTokenRefreshLockIT` / `…ConcurrencyIT`, `EncryptedBytesConverterIT`, `TransactionalEventDeliveryIT`, `IamAuditTaskExecutorIT`, `IdentityPropertiesBindingIT`; unit — `AccessTokenIssuerTest`, `StravaOAuthClientErrorDecoderTest`, `AesGcmCipherTest`, `EncryptedBytesConverterTest`, `PerUserTokenRefreshLockUnitTest`, `TokenRefreshLockPropertiesTest`.
 
-Чинний код ще має `oauth2Login`, `oauth2Client` і дві chain (`apiChain` + `browserChain`). Їх замінюють кроки 3–7.
+Чинна security: `oauth2Login`/`browserChain` уже прибрано; дві chain — `apiChain` (`/api/**`, resource server з нашим decoder-ом, `STATELESS`) + `fallbackChain` (без matcher-а: `/.well-known/**`, swagger, health/prometheus — `permitAll`, решта `denyAll`). Залишки логіну через redirect (`OAuth2GoogleLogin*Handler`, `LoginProperties`) прибирає крок 9.
 
 ---
 
@@ -71,18 +72,18 @@
 
 - [ ] Додати в `V4` `uq_user_identities_provider_identity (provider, provider_user_id)`, `uq_user_identities_user_provider (user_id, provider)`, `ix_user_identities_user`. Міграцію ще ніде не застосовано, тож правити на місці законно.
 - [ ] Узгодити `last_login_at` vs `updated_at` у міграції, entity і `database.md`.
-- [ ] Гілка returning user у `handleLogin`: оновити `lastLoginAt`.
+- [x] Гілка returning user у `handleLogin`: оновити `lastLoginAt`.
 - [ ] Гонка першого логіну: unique constraint + `DataIntegrityViolationException` → повторний read (pattern 2 з [`idempotency-and-outbox.md`](../technical-notes/idempotency-and-outbox.md)).
 - [ ] **DoD:** IT з двома паралельними першими логінами дає рівно один `User`.
 
 ## Крок 3 — Видача й валідація нашого JWT
 
-- [ ] Завантаження RSA-ключа (base64 PEM з конфігу або файлу), `kid`; бін `JwtEncoder` (Nimbus).
-- [ ] `AccessTokenIssuer`: claims `sub` = `user_id`, `iss`, `aud` = `aperitivo-api`, `iat`, `exp` = 15 хв, `jti`, і нічого більше.
-- [ ] `JwtDecoder` для **нашого** токена: підпис, `iss`, `aud`, `exp`.
+- [x] Завантаження RSA-ключа (base64 PEM з конфігу або файлу), `kid`; бін `JwtEncoder` (Nimbus).
+- [x] `AccessTokenIssuer`: claims `sub` = `user_id`, `iss`, `aud` = `aperitivo-api`, `iat`, `exp` = 15 хв, `jti`, і нічого більше.
+- [x] `JwtDecoder` для **нашого** токена: підпис, `iss`, `aud`, `exp`.
 - [ ] Конвертер JWT → `CurrentUser(UUID userId)` у published API IAM.
 - [ ] Одна stateless `SecurityFilterChain`, deny by default ([api.md §Security filter chain](../contexts/identity-access/api.md)): без `securityMatcher`, `STATELESS`, CSRF off, CORS off, наш decoder передано явно, `AuthenticationEntryPoint` → `401` Problem Details.
-- [ ] `GET /.well-known/jwks.json`.
+- [x] `GET /.well-known/jwks.json`.
 - [ ] `GET /api/me`.
 - [ ] **Тести:** невідомий шлях → відмова; жодна відповідь не ставить `JSESSIONID`; протухлий / чужий токен → `401`.
 
@@ -147,12 +148,12 @@
 | Крок | Статус |
 |---|---|
 | 1. Flyway-колізія | ✅ |
-| 2. `user_identities` | ⬜ |
-| 3. Наш JWT + chain | ⬜ |
-| 4. `POST /api/auth/google` | ⬜ |
-| 5. Refresh + logout | ⬜ |
-| 6. Strava connect | ⬜ |
-| 7. Події | ⬜ |
-| 8. Problem Details | ⬜ |
-| 9. Чистка + anti-drift | ⬜ |
-| 10. Hardening | ⬜ |
+| 2. `user_identities` | 🟡 |
+| 3. Наш JWT + chain | 🟡 видача/валідація готові, chain і `CurrentUser` — ні |
+| 4. `POST /api/auth/google` | ⬜️ |
+| 5. Refresh + logout | ⬜️ |
+| 6. Strava connect | ⬜️ |
+| 7. Події | ⬜️ |
+| 8. Problem Details | ⬜️ |
+| 9. Чистка + anti-drift | ⬜️ |
+| 10. Hardening | ⬜️ |
