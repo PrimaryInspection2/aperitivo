@@ -17,6 +17,7 @@ import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.Instant;
 
 @Service
@@ -31,6 +32,8 @@ public class OAuth2GoogleLoginCallbackService {
     private final UserIdentityMapper userIdentityMapper;
 
     private final ApplicationEventPublisher eventPublisher;
+
+    private final Clock clock;
 
     @Retryable(retryFor = DataIntegrityViolationException.class)
     @Transactional
@@ -47,7 +50,7 @@ public class OAuth2GoogleLoginCallbackService {
         UserEntity user = userEntityMapper.toEntity(profile);
         userRepository.save(user);
 
-        UserIdentityEntity userIdentity = userIdentityMapper.toEntity(profile, user.getId());
+        UserIdentityEntity userIdentity = userIdentityMapper.toEntity(profile, user.getId(), clock);
         userIdentityRepository.save(userIdentity);
         eventPublisher.publishEvent(new UserRegisteredEvent(user.getId()));
         return new LoginResult(user.getId(), true);
