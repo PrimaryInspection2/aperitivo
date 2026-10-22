@@ -1,6 +1,7 @@
 package dev.amishko.aperitivo.config;
 
 import dev.amishko.aperitivo.identity.events.dto.IntegrationRevokedEvent;
+import dev.amishko.aperitivo.identity.events.dto.UserRegisteredEvent;
 import org.springframework.boot.test.context.TestComponent;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -29,17 +30,28 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class RecordedEvents {
 
     private final List<IntegrationRevokedEvent> integrationRevokedAfterCommit = new CopyOnWriteArrayList<>();
+    private final List<UserRegisteredEvent> userRegisteredAfterCommit = new CopyOnWriteArrayList<>();
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     void onIntegrationRevokedAfterCommit(IntegrationRevokedEvent event) {
         integrationRevokedAfterCommit.add(event);
     }
 
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    void onUserRegisteredAfterCommit(UserRegisteredEvent event) {
+        userRegisteredAfterCommit.add(event);
+    }
+
     public List<IntegrationRevokedEvent> integrationRevokedAfterCommit() {
         return List.copyOf(integrationRevokedAfterCommit);
     }
 
+    public List<UserRegisteredEvent> userRegisteredAfterCommit() {
+        return List.copyOf(userRegisteredAfterCommit);
+    }
+
     public void clear() {
         integrationRevokedAfterCommit.clear();
+        userRegisteredAfterCommit.clear();
     }
 }
