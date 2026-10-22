@@ -4,7 +4,6 @@ import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -29,10 +28,13 @@ public class OAuth2SecurityConfig {
     };
 
     @Bean
-    @Order(1)
     SecurityFilterChain apiChain(HttpSecurity http, JwtDecoder jwtDecoder) {
-        http.securityMatcher("/api/**")
-                .authorizeHttpRequests(a -> a.anyRequest().authenticated())
+            http
+                .authorizeHttpRequests(requests -> requests
+                        .requestMatchers("/api/**").authenticated()
+                        .requestMatchers(PUBLIC_INFRA_PATTERNS).permitAll()
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        .anyRequest().denyAll())
                 .sessionManagement(session -> session.sessionCreationPolicy(STATELESS))
                 //.userDetailsService(userDetailsService) // No authentication manager needed for JWT?
                 .oauth2ResourceServer(oauth2 -> oauth2
@@ -42,16 +44,5 @@ public class OAuth2SecurityConfig {
         return http.build();
     }
 
-    @Bean
-    @Order(2)
-    SecurityFilterChain fallbackChain(HttpSecurity http) {
-        http.authorizeHttpRequests(requests -> requests
-                // The container's ERROR dispatch to /error is re-authorized too; without this
-                // a 404/500 of a permitted endpoint is masked as 403.
-                .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
-                .requestMatchers(PUBLIC_INFRA_PATTERNS).permitAll()
-                .anyRequest().denyAll());
-        return http.build();
-    }
 
 }

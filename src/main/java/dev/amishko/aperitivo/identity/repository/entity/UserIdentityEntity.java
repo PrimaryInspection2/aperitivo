@@ -58,14 +58,8 @@ public class UserIdentityEntity implements Persistable<UUID> {
     @ToString.Exclude
     private Instant createdAt;
 
-    @Column(name = "updated_at", nullable = false)
-    @UpdateTimestamp
-    @Setter(AccessLevel.NONE)
-    @ToString.Exclude
-    private Instant updatedAt;
-
     @Override
     public boolean isNew() {
-        return Objects.isNull(this.createdAt) || Objects.isNull(this.updatedAt);
+        return Objects.isNull(this.createdAt) || Objects.isNull(this.lastLoginAt);
     }
 }

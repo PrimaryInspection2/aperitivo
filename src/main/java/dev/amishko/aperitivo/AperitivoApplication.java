@@ -14,8 +14,8 @@ import org.springframework.scheduling.annotation.EnableAsync;
 @EnableAsync
 public class AperitivoApplication {
 
-	public static void main(String[] args) {
-		SpringApplication.run(AperitivoApplication.class, args);
-	}
+    static void main(String[] args) {
+        SpringApplication.run(AperitivoApplication.class, args);
+    }
 
 }
