@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,9 +34,8 @@ public class OAuth2GoogleLoginCallbackService {
 
     private final ApplicationEventPublisher eventPublisher;
 
-    private final Clock clock;
 
-    @Retryable(retryFor = DataIntegrityViolationException.class)
+    @Retryable(retryFor = DataIntegrityViolationException.class, maxAttempts = 3, backoff = @Backoff(delay = 50))
     @Transactional
     public LoginResult handleLogin(ProviderIdentityProfile profile) {
         return userIdentityRepository.findByProviderAndProviderUserId(profile.provider(), profile.providerUserId())
@@ -50,7 +50,7 @@ public class OAuth2GoogleLoginCallbackService {
         UserEntity user = userEntityMapper.toEntity(profile);
         userRepository.save(user);
 
-        UserIdentityEntity userIdentity = userIdentityMapper.toEntity(profile, user.getId(), clock);
+        UserIdentityEntity userIdentity = userIdentityMapper.toEntity(profile, user.getId());
         userIdentityRepository.save(userIdentity);
         eventPublisher.publishEvent(new UserRegisteredEvent(user.getId()));
         return new LoginResult(user.getId(), true);
