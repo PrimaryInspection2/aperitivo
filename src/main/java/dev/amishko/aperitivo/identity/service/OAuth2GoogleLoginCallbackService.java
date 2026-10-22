@@ -12,6 +12,8 @@ import dev.amishko.aperitivo.identity.repository.entity.UserIdentityEntity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,6 +32,7 @@ public class OAuth2GoogleLoginCallbackService {
 
     private final ApplicationEventPublisher eventPublisher;
 
+    @Retryable(retryFor = DataIntegrityViolationException.class)
     @Transactional
     public LoginResult handleLogin(ProviderIdentityProfile profile) {
         return userIdentityRepository.findByProviderAndProviderUserId(profile.provider(), profile.providerUserId())
