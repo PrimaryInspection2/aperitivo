@@ -60,6 +60,6 @@ public class UserIdentityEntity implements Persistable<UUID> {
 
     @Override
     public boolean isNew() {
-        return Objects.isNull(this.createdAt) || Objects.isNull(this.lastLoginAt);
+        return Objects.isNull(this.createdAt);
     }
 }
