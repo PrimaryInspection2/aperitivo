@@ -34,13 +34,15 @@ public class OAuth2GoogleLoginCallbackService {
 
     private final ApplicationEventPublisher eventPublisher;
 
+    private final Clock clock;
+
 
     @Retryable(retryFor = DataIntegrityViolationException.class, maxAttempts = 3, backoff = @Backoff(delay = 50))
     @Transactional
     public LoginResult handleLogin(ProviderIdentityProfile profile) {
         return userIdentityRepository.findByProviderAndProviderUserId(profile.provider(), profile.providerUserId())
                 .map(userIdentity -> {
-                    userIdentity.setLastLoginAt(Instant.now());
+                    userIdentity.setLastLoginAt(Instant.now(clock));
                     return new LoginResult(userIdentity.getUserId(), false);
                 })
                 .orElseGet(() -> register(profile));
