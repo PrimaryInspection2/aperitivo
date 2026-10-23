@@ -1,13 +1,12 @@
 package dev.amishko.aperitivo.identity.web;
 
+import dev.amishko.aperitivo.identity.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.UUID;
 
 @RestController("/api/me")
 @Slf4j
@@ -15,7 +14,7 @@ import java.util.UUID;
 public class UserProfileController {
 
     @GetMapping
-    public ResponseEntity<String> getUserProfile() {
+    public ResponseEntity<String> getUserProfile(@AuthenticationPrincipal CurrentUser currentUser) {
         return ResponseEntity.ok("Hello");
     }
 }
