@@ -7,13 +7,14 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 
 @Configuration
 @RequiredArgsConstructor
-public class OAuth2SecurityConfig {
+public class SecurityConfig {
 
     // Unauthenticated infra endpoints. Actuator is open here by design: it is
     // network-restricted at the edge, not by Spring Security (docs/operations/security.md).
@@ -28,7 +29,7 @@ public class OAuth2SecurityConfig {
     };
 
     @Bean
-    SecurityFilterChain apiChain(HttpSecurity http, JwtDecoder jwtDecoder) {
+    SecurityFilterChain apiChain(HttpSecurity http, JwtDecoder jwtDecoder, AuthenticationEntryPoint authenticationEntryPoint) {
             http
                 .authorizeHttpRequests(requests -> requests
                         .requestMatchers("/api/**").authenticated()
@@ -38,6 +39,8 @@ public class OAuth2SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(STATELESS))
                 //.userDetailsService(userDetailsService) // No authentication manager needed for JWT?
                 .oauth2ResourceServer(oauth2 -> oauth2
+                        .accessDeniedHandler()
+                        .authenticationEntryPoint(authenticationEntryPoint)
                         .jwt(jwt -> jwt
                                 .decoder(jwtDecoder)))
                 .csrf(AbstractHttpConfigurer::disable); //check against refresh token cookie

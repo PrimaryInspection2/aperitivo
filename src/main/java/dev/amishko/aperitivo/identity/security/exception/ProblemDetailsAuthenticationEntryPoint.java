@@ -1,0 +1,37 @@
+package dev.amishko.aperitivo.identity.security.exception;
+
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ProblemDetail;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.stereotype.Component;
+import tools.jackson.databind.json.JsonMapper;
+
+import java.io.IOException;
+import java.net.URI;
+
+@Component
+@RequiredArgsConstructor
+public class ProblemDetailsAuthenticationEntryPoint implements AuthenticationEntryPoint {
+
+    private static final String DOMAIN_TYPE = "https://aperitivo.app/errors/unautentichated";
+
+    private final JsonMapper jsonMapper;
+
+    @Override
+    public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException authException) throws IOException {
+        int status = response.getStatus();
+
+        ProblemDetail problemDetail = ProblemDetail.forStatus(status);
+
+        problemDetail.setType(URI.create(DOMAIN_TYPE));
+        problemDetail.setTitle("Authentication Failed");
+        problemDetail.setProperty("WWW-Authenticate", "Bearer");
+        problemDetail.setProperty("Content-Type", "application/problem+json");
+
+        jsonMapper.writeValue(response.getOutputStream(), problemDetail);
+    }
+}

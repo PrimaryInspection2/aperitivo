@@ -86,7 +86,7 @@ class FallbackChainScratchTest {
             ServletWebSecurityAutoConfiguration.class,
             SecurityFilterAutoConfiguration.class
     })
-    @Import(OAuth2SecurityConfig.class)
+    @Import(SecurityConfig.class)
     static class Cfg {
         @Bean
         JwtDecoder jwtDecoder() {
