@@ -15,7 +15,7 @@ import java.util.UUID;
 public class UserProfileController {
 
     @GetMapping
-    public ResponseEntity<String> index(@PathVariable UUID userUuid) {
-        return ResponseEntity.ok("Hello " + userUuid);
+    public ResponseEntity<String> getUserProfile() {
+        return ResponseEntity.ok("Hello");
     }
 }
