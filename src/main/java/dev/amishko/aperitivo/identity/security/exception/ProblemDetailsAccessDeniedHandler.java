@@ -30,8 +30,8 @@ public class ProblemDetailsAccessDeniedHandler implements AccessDeniedHandler {
 
         int status = response.getStatus();
         ProblemDetail problemDetail = ProblemDetail.forStatus(status);
-        problemDetail.setType(URI.create(request.getRequestURI()));
-        problemDetail.setInstance(URI.create(DOMAIN_TYPE));
+        problemDetail.setType(URI.create(DOMAIN_TYPE));
+        problemDetail.setInstance(URI.create(request.getRequestURI()));
         problemDetail.setTitle("Access Denied");
 
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
