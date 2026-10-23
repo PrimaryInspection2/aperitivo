@@ -4,6 +4,7 @@ import dev.amishko.aperitivo.identity.CurrentUser;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtException;
+import org.springframework.security.oauth2.server.resource.InvalidBearerTokenException;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 import java.util.Collection;
@@ -23,7 +24,7 @@ public class CurrentUserAuthenticationToken extends JwtAuthenticationToken {
         return Optional.ofNullable(jwt)
                 .map(Jwt::getSubject)
                 .map(UUID::fromString)
-                .orElseThrow(() -> new JwtException("Missing or invalid 'sub' claim. UUID format expected"));
+                .orElseThrow(() -> new InvalidBearerTokenException("Missing or invalid 'sub' claim. UUID format expected"));
     }
 
     @Override

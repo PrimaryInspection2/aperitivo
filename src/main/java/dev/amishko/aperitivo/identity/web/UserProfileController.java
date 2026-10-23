@@ -8,12 +8,12 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@RestController("/api/me")
+@RestController
 @Slf4j
 @RequiredArgsConstructor
 public class UserProfileController {
 
-    @GetMapping
+    @GetMapping("/api/me")
     public ResponseEntity<String> getUserProfile(@AuthenticationPrincipal CurrentUser currentUser) {
         return ResponseEntity.ok("Hello");
     }

@@ -2,9 +2,11 @@ package dev.amishko.aperitivo.identity.config;
 
 import dev.amishko.aperitivo.identity.config.properties.JWKProperties;
 import dev.amishko.aperitivo.identity.security.AccessTokenIssuer;
+import dev.amishko.aperitivo.identity.security.JwtTokenConverter;
 import dev.amishko.aperitivo.identity.security.exception.ProblemDetailsAccessDeniedHandler;
 import dev.amishko.aperitivo.identity.security.exception.ProblemDetailsAuthenticationEntryPoint;
 import dev.amishko.aperitivo.identity.web.OAuth2ConfigurationController;
+import dev.amishko.aperitivo.identity.web.UserProfileController;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -24,6 +26,9 @@ import org.springframework.boot.webmvc.autoconfigure.WebMvcAutoConfiguration;
 import org.springframework.boot.webmvc.autoconfigure.error.ErrorMvcAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.JsonNode;
@@ -42,19 +47,21 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.oauth2.jose.jws.SignatureAlgorithm.RS256;
 
 
 @SpringBootTest(
-        classes = SecurityChainTest.Cfg.class,
+        classes = SecurityChainIT.Cfg.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "logging.level.org.springframework.security=WARN",
                 "logging.level.org.springframework.web=WARN"
         })
-class SecurityChainTest {
+class SecurityChainIT {
 
     private static final String ISSUER = "https://aperitivo.test";
     private static final String AUDIENCE = "aperitivo-api";
@@ -87,6 +94,12 @@ class SecurityChainTest {
         void apiWithoutToken() throws Exception {
             HttpResponse<String> response = get(PROBE, null);
             assertUnauthenticated(response, PROBE);
+        }
+
+        @Test
+        @DisplayName("GET /api/me without a token → 401 Problem Details")
+        void meWithoutToken() throws Exception {
+            assertUnauthenticated(get("/api/me", null), "/api/me");
         }
 
         @Test
@@ -139,6 +152,12 @@ class SecurityChainTest {
         }
 
         @Test
+        @DisplayName("correctly signed token whose sub is not a UUID → 401 Problem Details, not 500")
+        void subIsNotAUuid() throws Exception {
+            assertUnauthenticated(get(PROBE, tokenWithSubject("google-sub-1234567890")), PROBE);
+        }
+
+        @Test
         @DisplayName("garbage in the Authorization header → 401 Problem Details")
         void malformedToken() throws Exception {
             assertUnauthenticated(get(PROBE, "not-a-jwt"), PROBE);
@@ -156,6 +175,19 @@ class SecurityChainTest {
 
             assertThat(response.statusCode()).isEqualTo(200);
             assertThat(response.body()).isEqualTo("ok");
+            assertNoSessionCookie(response);
+        }
+
+        @Test
+        @DisplayName("GET /api/me → 200 with the userId taken from the token's sub")
+        void me() throws Exception {
+            UUID userId = UUID.randomUUID();
+            String token = issuer(ourProperties, Instant.now()).issueAccessToken(userId).token();
+
+            HttpResponse<String> response = get("/api/me", token);
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(response.body()).contains(userId.toString());
             assertNoSessionCookie(response);
         }
 
@@ -205,6 +237,21 @@ class SecurityChainTest {
         return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }
 
+    private String tokenWithSubject(String subject) {
+        Instant now = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .subject(subject)
+                .issuer(ISSUER)
+                .audience(List.of(AUDIENCE))
+                .issuedAt(now)
+                .expiresAt(now.plus(Duration.ofMinutes(5)))
+                .id(UUID.randomUUID().toString())
+                .build();
+        JwsHeader header = JwsHeader.with(RS256).keyId("test-kid").build();
+        return new AperitivoJWKConfig(ourProperties).aperitivoJwtEncoder()
+                .encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+    }
+
     private String validToken() {
         return issuer(ourProperties, Instant.now()).issueAccessToken(UUID.randomUUID()).token();
     }
@@ -230,7 +277,7 @@ class SecurityChainTest {
     }
 
     // Deliberately not @Configuration: registered via classes= only, so the full application's
-    // component scan (AperitivoApplicationTests) never picks it up. @TestComponent does the same for the probe.
+// component scan (AperitivoApplicationTests) never picks it up. @TestComponent does the same for the probe.
     @ImportAutoConfiguration(classes = {
             TomcatServletWebServerAutoConfiguration.class,
             DispatcherServletAutoConfiguration.class,
@@ -247,7 +294,9 @@ class SecurityChainTest {
             AperitivoJWKConfig.class,
             ProblemDetailsAuthenticationEntryPoint.class,
             ProblemDetailsAccessDeniedHandler.class,
+            JwtTokenConverter.class,
             OAuth2ConfigurationController.class,
+            UserProfileController.class,
             ProbeController.class
     })
     static class Cfg {
