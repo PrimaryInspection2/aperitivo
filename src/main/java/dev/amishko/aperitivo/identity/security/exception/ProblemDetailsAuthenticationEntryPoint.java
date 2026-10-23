@@ -1,6 +1,5 @@
 package dev.amishko.aperitivo.identity.security.exception;
 
-import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +18,7 @@ import java.net.URI;
 @RequiredArgsConstructor
 public class ProblemDetailsAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
-    private static final String DOMAIN_TYPE = "https://aperitivo.app/errors/unautentichated";
+    private static final String DOMAIN_TYPE = "https://aperitivo.app/errors/unauthentichated";
 
     private final JsonMapper jsonMapper;
 
@@ -31,6 +30,7 @@ public class ProblemDetailsAuthenticationEntryPoint implements AuthenticationEnt
 
         int status = response.getStatus();
         ProblemDetail problemDetail = ProblemDetail.forStatus(status);
+        problemDetail.setType(URI.create(request.getRequestURI()));
         problemDetail.setInstance(URI.create(DOMAIN_TYPE));
         problemDetail.setTitle("Authentication Failed");
 
