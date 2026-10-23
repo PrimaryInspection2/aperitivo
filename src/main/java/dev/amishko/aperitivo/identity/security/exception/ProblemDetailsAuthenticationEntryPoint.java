@@ -18,7 +18,7 @@ import java.net.URI;
 @RequiredArgsConstructor
 public class ProblemDetailsAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
-    private static final String DOMAIN_TYPE = "https://aperitivo.app/errors/unauthentichated";
+    private static final String DOMAIN_TYPE = "https://aperitivo.app/errors/unauthenticated";
 
     private final JsonMapper jsonMapper;
 
