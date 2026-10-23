@@ -1,5 +1,6 @@
 package dev.amishko.aperitivo.identity.config;
 
+import dev.amishko.aperitivo.identity.security.JwtTokenConverter;
 import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -30,7 +31,8 @@ public class SecurityConfig {
     };
 
     @Bean
-    SecurityFilterChain apiChain(HttpSecurity http, JwtDecoder jwtDecoder, AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler) {
+    SecurityFilterChain apiChain(HttpSecurity http, JwtDecoder jwtDecoder, AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler,
+                                 JwtTokenConverter  jwtTokenConverter) {
             http
                 .authorizeHttpRequests(requests -> requests
                         .requestMatchers("/api/**").authenticated()
@@ -43,6 +45,7 @@ public class SecurityConfig {
                         .accessDeniedHandler(accessDeniedHandler)
                         .authenticationEntryPoint(authenticationEntryPoint)
                         .jwt(jwt -> jwt
+                                .jwtAuthenticationConverter(jwtTokenConverter)
                                 .decoder(jwtDecoder)))
                 .csrf(AbstractHttpConfigurer::disable); //check against refresh token cookie
         return http.build();
