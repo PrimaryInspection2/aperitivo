@@ -9,6 +9,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.AccessDeniedHandler;
 
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 
@@ -29,7 +30,7 @@ public class SecurityConfig {
     };
 
     @Bean
-    SecurityFilterChain apiChain(HttpSecurity http, JwtDecoder jwtDecoder, AuthenticationEntryPoint authenticationEntryPoint) {
+    SecurityFilterChain apiChain(HttpSecurity http, JwtDecoder jwtDecoder, AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler) {
             http
                 .authorizeHttpRequests(requests -> requests
                         .requestMatchers("/api/**").authenticated()
@@ -39,7 +40,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(STATELESS))
                 //.userDetailsService(userDetailsService) // No authentication manager needed for JWT?
                 .oauth2ResourceServer(oauth2 -> oauth2
-                        .accessDeniedHandler()
+                        .accessDeniedHandler(accessDeniedHandler)
                         .authenticationEntryPoint(authenticationEntryPoint)
                         .jwt(jwt -> jwt
                                 .decoder(jwtDecoder)))
