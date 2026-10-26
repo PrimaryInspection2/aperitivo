@@ -1,6 +1,6 @@
 package dev.amishko.aperitivo.identity.config;
 
-import dev.amishko.aperitivo.identity.security.JwtTokenConverter;
+import dev.amishko.aperitivo.identity.security.AperitivoJwtTokenConverter;
 import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -32,10 +32,10 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain apiChain(HttpSecurity http, JwtDecoder jwtDecoder, AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler,
-                                 JwtTokenConverter  jwtTokenConverter) {
-            http
+                                 AperitivoJwtTokenConverter jwtTokenConverter) {
+        http
                 .authorizeHttpRequests(requests -> requests
-                        .requestMatchers("/api/**").permitAll()
+                        .requestMatchers("/api/**").authenticated()
                         .requestMatchers(PUBLIC_INFRA_PATTERNS).permitAll()
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .anyRequest().denyAll())

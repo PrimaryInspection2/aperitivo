@@ -2,7 +2,7 @@ package dev.amishko.aperitivo.identity.config;
 
 import dev.amishko.aperitivo.identity.config.properties.JWKProperties;
 import dev.amishko.aperitivo.identity.security.AccessTokenIssuer;
-import dev.amishko.aperitivo.identity.security.JwtTokenConverter;
+import dev.amishko.aperitivo.identity.security.AperitivoJwtTokenConverter;
 import dev.amishko.aperitivo.identity.security.exception.ProblemDetailsAccessDeniedHandler;
 import dev.amishko.aperitivo.identity.security.exception.ProblemDetailsAuthenticationEntryPoint;
 import dev.amishko.aperitivo.identity.web.OAuth2ConfigurationController;
@@ -294,7 +294,7 @@ class SecurityChainIT {
             AperitivoJWKConfig.class,
             ProblemDetailsAuthenticationEntryPoint.class,
             ProblemDetailsAccessDeniedHandler.class,
-            JwtTokenConverter.class,
+            AperitivoJwtTokenConverter.class,
             OAuth2ConfigurationController.class,
             UserProfileController.class,
             ProbeController.class
