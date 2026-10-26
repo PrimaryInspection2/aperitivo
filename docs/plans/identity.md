@@ -37,11 +37,11 @@
 ## ✅ Зроблено
 
 - **Каркас модуля:** пакети, `package-info`, `ApplicationModules.verify()` в `AperitivoApplicationTests`.
-- **Схема і дані:** Flyway `V1`–`V4` (schema, `users`, `connected_sources`, `user_identities` — поки без констрейнтів, див. крок 2); тестове дзеркало `event_publication` винесене у `V999`, колізії версій немає; `UserEntity`, `ConnectedSourceEntity`, `UserIdentityEntity` (plain data) і їхні репозиторії; між агрегатами лише `UUID`-посилання.
+- **Схема і дані:** Flyway `V1`–`V4` (schema, `users`, `connected_sources`, `user_identities` з обома unique-констрейнтами); тестове дзеркало `event_publication` винесене у `V999`, колізії версій немає; `UserEntity`, `ConnectedSourceEntity`, `UserIdentityEntity` (plain data) і їхні репозиторії; між агрегатами лише `UUID`-посилання.
 - **AES-GCM:** `AesGcmCipher` (96-бітний nonce на кожне шифрування), `EncryptedBytesConverter`, `EncryptionProperties`; тести `AesGcmCipherTest`, `EncryptedBytesConverterTest`, `EncryptedBytesConverterIT`.
 - **TokenManager (Strava):** published-інтерфейс `TokenManager` (`markRevoked(userId, reason)` уже без `provider`); `StravaTokenManager` з lazy refresh, per-user Redis lock (`PerUserTokenRefreshLock`), `markRevoked` з guard-ом переходу і `IntegrationRevokedEvent`, аудит `recordSuccessfulUse`/`recordFailure` (`@Async("iamAuditTaskExecutor")`, обмежена черга, `try/catch` з логуванням усередині), `@Retryable` на `markRevoked`/`persistRefreshed` (`@EnableRetry`).
 - **Помилки OAuth Strava:** Feign-клієнти в окремих child-контекстах, `StravaOAuthClientErrorDecoder` → `OAuthBadRequestException` / `OAuthClientCredentialsException` / `OAuthTransientException` / `OAuthUnexpectedStatusException` у published surface; базовий `TransientException`; прихованого revoke в `getValidAccessToken` немає.
-- **Провіженінг логіну (частково):** `OAuth2GoogleLoginCallbackService.handleLogin` створює `User` + `UserIdentity` за `(provider, providerUserId)` і емітить `UserRegisteredEvent` для нового юзера; гілка returning user оновлює `lastLoginAt` (поки `Instant.now()`, не `Clock`).
+- **Провіженінг логіну (частково):** `OAuth2GoogleLoginCallbackService.handleLogin` створює `User` + `UserIdentity` за `(provider, providerUserId)` і емітить `UserRegisteredEvent` для нового юзера; гілка returning user оновлює `lastLoginAt` через `Clock`; гонку першого логіну закрито `@Retryable` (крок 2).
 - **Тести:** Testcontainers Postgres + Redis (`BaseIT`); IT — `StravaTokenManagerIT`, `StravaTokenManagerRetryIT`, `StravaTokenStateServiceIT`, `PerUserTokenRefreshLockIT` / `…ConcurrencyIT`, `EncryptedBytesConverterIT`, `TransactionalEventDeliveryIT`, `IamAuditTaskExecutorIT`, `IdentityPropertiesBindingIT`; unit — `AccessTokenIssuerTest`, `StravaOAuthClientErrorDecoderTest`, `AesGcmCipherTest`, `EncryptedBytesConverterTest`, `PerUserTokenRefreshLockUnitTest`, `TokenRefreshLockPropertiesTest`.
 
 Чинна security: `oauth2Login`/`browserChain` уже прибрано; дві chain — `apiChain` (`/api/**`, resource server з нашим decoder-ом, `STATELESS`) + `fallbackChain` (без matcher-а: `/.well-known/**`, swagger, health/prometheus — `permitAll`, решта `denyAll`). Залишки логіну через redirect (`OAuth2GoogleLogin*Handler`, `LoginProperties`) прибирає крок 9.
@@ -70,11 +70,11 @@
 
 ## Крок 2 — `user_identities` до схеми з `database.md`
 
-- [ ] Додати в `V4` `uq_user_identities_provider_identity (provider, provider_user_id)`, `uq_user_identities_user_provider (user_id, provider)`, `ix_user_identities_user`. Міграцію ще ніде не застосовано, тож правити на місці законно.
-- [ ] Узгодити `last_login_at` vs `updated_at` у міграції, entity і `database.md`.
+- [x] `V4`: `uq_user_identities_provider_user_id_provider (provider, provider_user_id)`, `uq_user_identities_user_id_provider (user_id, provider)`; окремий `ix_user_identities_user` не потрібен (лівий префікс другого unique). `database.md` оновлено під назви з `V4`.
+- [x] Узгодити `last_login_at` vs `updated_at`: `updated_at` прибрано з міграції та entity, `isNew()` спирається на `createdAt`.
 - [x] Гілка returning user у `handleLogin`: оновити `lastLoginAt`.
-- [ ] Гонка першого логіну: unique constraint + `DataIntegrityViolationException` → повторний read (pattern 2 з [`idempotency-and-outbox.md`](../technical-notes/idempotency-and-outbox.md)).
-- [ ] **DoD:** IT з двома паралельними першими логінами дає рівно один `User`.
+- [x] Гонка першого логіну: unique constraint + `DataIntegrityViolationException` → `@Retryable` у новій транзакції (pattern 2 з [`idempotency-and-outbox.md`](../technical-notes/idempotency-and-outbox.md)); `Clock` замість `Instant.now()`.
+- [x] **DoD:** `FirstLoginRaceIT` — два паралельні перші логіни дають рівно один `User`, одну identity, одну подію.
 
 ## Крок 3 — Видача й валідація нашого JWT
 
@@ -148,7 +148,7 @@
 | Крок | Статус |
 |---|---|
 | 1. Flyway-колізія | ✅ |
-| 2. `user_identities` | 🟡 |
+| 2. `user_identities` | ✅ |
 | 3. Наш JWT + chain | 🟡 видача/валідація готові, chain і `CurrentUser` — ні |
 | 4. `POST /api/auth/google` | ⬜️ |
 | 5. Refresh + logout | ⬜️ |

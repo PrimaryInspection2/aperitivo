@@ -281,6 +281,8 @@ public class LoginService {
 
 Login never acquires, encrypts or stores provider tokens; it has no `ACTIVE`/`REVOKED`/`ERROR` to reason about and no reconnect branch. All of that belongs to `ConnectedSourceService`, reached through the connect flow, which is where a connection lifecycle belongs. A login is exactly what its name says.
 
+**Concurrent first logins.** Two requests for the same new `sub` (a double click, two tabs) can both find no identity. The unique constraint on `(provider, provider_user_id)` rejects the second insert, its transaction rolls back entirely, and `@Retryable` — whose advice runs *outside* `@Transactional` — re-runs `login` in a new transaction, where the lookup now finds the winner and returns `LoginResult(userId, false)`. Exactly one user, one identity and one `UserRegisteredEvent` result (see [database.md](database.md#constraints-and-indexes)).
+
 An unmatched `(provider, providerUserId)` **always** creates a new account. It is never matched against an existing user by email, and never merged — see the linking rules in [ADR 0011](../../adr/0011-identity-provider-signup.md).
 
 #### Why it returns a value and not `void`

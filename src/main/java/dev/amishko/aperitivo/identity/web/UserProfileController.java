@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserProfileController {
 
     @GetMapping("/api/me")
-    public ResponseEntity<String> getUserProfile(CurrentUserAuthenticationToken currentUserAuthenticationToken) {
+    public ResponseEntity<String> getUserProfile(@ParamCurrentUserAuthenticationToken currentUserAuthenticationToken) {
         return ResponseEntity.ok("Hello");
     }
 }

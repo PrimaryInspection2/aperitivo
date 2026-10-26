@@ -130,19 +130,18 @@ Notes:
 -- ---------- user_identities ----------
 
 -- A given provider account signs in exactly one Aperitivo user.
+-- Also arbitrates the first-login race (see index rationale below).
 ALTER TABLE user_identities
-    ADD CONSTRAINT uq_user_identities_provider_identity
+    ADD CONSTRAINT uq_user_identities_provider_user_id_provider
     UNIQUE (provider, provider_user_id);
 
--- A user links a given provider at most once.
+-- A user links a given provider at most once. Its leading column also serves
+-- "which sign-in methods does this user have?" (settings page, the "cannot
+-- remove the last one" guard) and the FK on user_id, so no separate
+-- index on (user_id) exists.
 ALTER TABLE user_identities
-    ADD CONSTRAINT uq_user_identities_user_provider
+    ADD CONSTRAINT uq_user_identities_user_id_provider
     UNIQUE (user_id, provider);
-
--- "Which sign-in methods does this user have?" — settings page, and the
--- "cannot remove the last one" guard.
-CREATE INDEX ix_user_identities_user
-    ON user_identities (user_id);
 
 -- ---------- connected_sources ----------
 
@@ -187,8 +186,8 @@ CREATE INDEX ix_refresh_tokens_expires_at
 ```
 
 Index rationale:
-- `uq_user_identities_provider_identity` enforces "a sign-in method belongs to exactly one user" (invariant 3). It is also the login lookup: `findByProviderAndProviderUserId(GOOGLE, sub)` decides register-vs-login in one indexed read.
-- `uq_user_identities_user_provider` stops a user accumulating two Google identities. Linking a second Google account is a conflict, not an addition.
+- `uq_user_identities_provider_user_id_provider` enforces "a sign-in method belongs to exactly one user" (invariant 3). It is also the login lookup: `findByProviderAndProviderUserId(GOOGLE, sub)` decides register-vs-login in one indexed read. `provider` leads because it is the only column meaningful on its own (`sub` is unique only within its issuer), so the index also serves per-provider queries. It is also the arbiter of the **first-login race**: when two requests for the same new `sub` both find no identity, the second `INSERT` fails with a unique violation, its whole transaction (the orphan `users` row and the `UserRegisteredEvent` publication included) rolls back, and the login is retried in a new transaction that resolves the winner's user (pattern 2 in [idempotency-and-outbox.md](../../technical-notes/idempotency-and-outbox.md); see `LoginService` in [domain-model.md](domain-model.md)).
+- `uq_user_identities_user_id_provider` stops a user accumulating two Google identities. Linking a second Google account is a conflict, not an addition. Its leading `user_id` column serves lookups by user and the FK, which is why there is no separate `(user_id)` index.
 - `uq_…_provider_identity` on `connected_sources` enforces invariant 2 and answers "is this Strava athlete already connected to somebody?" during the connect flow.
 - `uq_…_active_per_user_provider` enforces invariant 5. Making it **partial** (`WHERE status <> 'REVOKED'`) lets a revoked row coexist with an active one for the same `(user, provider)`.
 - `ix_…_user_provider` serves the hottest read — `findByUserIdAndProvider` on every token access. (It overlaps the partial unique index but is unconditional, so it also covers revoked rows for audit/history reads.)
@@ -233,7 +232,7 @@ The DB `DEFAULT now()` on timestamps is a safety net; in practice Hibernate popu
   1. `V1__create_schema.sql` — the `identity` schema.
   2. `V2__create_users_table.sql` — `users`.
   3. `V3__create_connected_sources_table.sql` — `connected_sources`, FK, unique constraint, indexes.
-  4. `V4__create_user_identities_table.sql` — `user_identities`, FK, both unique constraints, index. Introduced by [ADR 0011](../../adr/0011-identity-provider-signup.md).
+  4. `V4__create_user_identities_table.sql` — `user_identities`, FK, both unique constraints (no separate index — see above). Introduced by [ADR 0011](../../adr/0011-identity-provider-signup.md).
   5. A new changeset creates `refresh_tokens`, its FK, the unique `token_hash` constraint and the three indexes. Introduced by [ADR 0013](../../adr/0013-access-and-refresh-tokens.md); its version number is assigned when it is written.
 - **Test-only migrations use versions from `V900` up** (today `V999__create_event_publication_table_for_itest.sql` under `src/test-integration/resources/db/migration/identity`). Integration tests put test resources on the same classpath location, so a test migration with a low number collides with the next production one, and Flyway refuses to start.
 - `V4` is **additive only**: `users` and `connected_sources` keep their shape. Login writes only to `users` and `user_identities`, never to `connected_sources`.
