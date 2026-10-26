@@ -35,7 +35,7 @@ public class SecurityConfig {
                                  JwtTokenConverter  jwtTokenConverter) {
             http
                 .authorizeHttpRequests(requests -> requests
-                        .requestMatchers("/api/**").authenticated()
+                        .requestMatchers("/api/**").permitAll()
                         .requestMatchers(PUBLIC_INFRA_PATTERNS).permitAll()
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .anyRequest().denyAll())
