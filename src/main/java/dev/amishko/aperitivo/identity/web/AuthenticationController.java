@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
+
 @Validated
 @RequiredArgsConstructor
 @RestController
@@ -26,7 +28,7 @@ public class AuthenticationController {
     private final LoginRegistrationService loginRegistrationService;
     private final AccessTokenIssuer accessTokenIssuer;
 
-    @PostMapping("/api/auth/google")
+    @PostMapping(value = "/api/auth/google", consumes = APPLICATION_JSON_VALUE)
     public ResponseEntity<@NonNull AperitivoAccessToken> loginWithGoogle(@RequestBody GoogleIdToken googleIdToken) {
         ProviderIdentityProfile providerIdentityProfile = googleIdTokenVerifier.verifyIdentity(googleIdToken.idToken());
         LoginResult loginResult = loginRegistrationService.handleLogin(providerIdentityProfile);

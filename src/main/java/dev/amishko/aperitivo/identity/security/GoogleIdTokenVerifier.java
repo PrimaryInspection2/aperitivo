@@ -25,13 +25,12 @@ public class GoogleIdTokenVerifier {
     public GoogleIdTokenVerifier(ClientRegistrationRepository clientRegistrationRepository) {
         this.googleClientRegistration = clientRegistrationRepository.findByRegistrationId("google");
         this.googleJwtDecoder = NimbusJwtDecoder.withIssuerLocation(googleClientRegistration.getProviderDetails().getIssuerUri()).build();
+        this.googleJwtDecoder.setJwtValidator(JwtValidators.createDefaultWithValidators(List.of(
+                new OidcIdTokenValidator(googleClientRegistration),
+                new JwtClaimValidator<>("email_verified", claim -> claim.equals("true")))));
     }
 
     public ProviderIdentityProfile verifyIdentity(String idToken) {
-        JwtValidators.createDefaultWithValidators(List.of(
-                new OidcIdTokenValidator(googleClientRegistration),
-                new JwtClaimValidator<>("email_verified", claim -> claim.equals("true"))));
-
         Jwt jwt;
         try {
             if (isNotBlank(idToken)) {

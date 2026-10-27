@@ -4,6 +4,7 @@ package dev.amishko.aperitivo.identity.security;
 import dev.amishko.aperitivo.identity.config.properties.JWKProperties;
 import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoAccessToken;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.stereotype.Service;
 
@@ -13,7 +14,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
-import static com.nimbusds.oauth2.sdk.token.AccessTokenType.BEARER;
+import static org.springframework.security.oauth2.core.OAuth2AccessToken.TokenType.BEARER;
 import static org.springframework.security.oauth2.jose.jws.SignatureAlgorithm.RS256;
 
 @Service
@@ -31,8 +32,9 @@ public class AccessTokenIssuer {
 
         JwtEncoderParameters jwtEncoderParameters = JwtEncoderParameters.from(header, claims);
         Jwt issuedJwt = jwtEncoder.encode(jwtEncoderParameters);
+        Long expiresIn = issuedJwt.getExpiresAt().minusSeconds(Instant.now().getEpochSecond()).toEpochMilli();
 
-        return new AperitivoAccessToken(issuedJwt.getTokenValue(), BEARER.getValue(), issuedJwt.getExpiresAt());
+        return new AperitivoAccessToken(issuedJwt.getTokenValue(), BEARER.getValue(), expiresIn);
     }
 
     private JwtClaimsSet buildClaims(UUID userId) {
