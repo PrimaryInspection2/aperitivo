@@ -9,6 +9,7 @@ import org.springframework.security.oauth2.jwt.*;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -32,7 +33,7 @@ public class AccessTokenIssuer {
 
         JwtEncoderParameters jwtEncoderParameters = JwtEncoderParameters.from(header, claims);
         Jwt issuedJwt = jwtEncoder.encode(jwtEncoderParameters);
-        Long expiresIn = issuedJwt.getExpiresAt().minusSeconds(Instant.now().getEpochSecond()).toEpochMilli();
+        Long expiresIn = Duration.between(issuedJwt.getIssuedAt(),issuedJwt.getExpiresAt()).toSeconds();
 
         return new AperitivoAccessToken(issuedJwt.getTokenValue(), BEARER.getValue(), expiresIn);
     }

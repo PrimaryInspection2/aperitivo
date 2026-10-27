@@ -134,7 +134,7 @@ class SecurityChainIT {
         @DisplayName("expired token → 401 Problem Details; body does not leak the validator message")
         void expiredToken() throws Exception {
             Instant longAgo = Instant.now().minus(Duration.ofHours(1));
-            String token = issuer(ourProperties, longAgo).issueAccessToken(UUID.randomUUID()).token();
+            String token = issuer(ourProperties, longAgo).issueAccessToken(UUID.randomUUID()).accessToken();
 
             HttpResponse<String> response = get(PROBE, token);
 
@@ -146,7 +146,7 @@ class SecurityChainIT {
         @DisplayName("token signed by a foreign key → 401 Problem Details")
         void foreignSignature() throws Exception {
             JWKProperties foreign = properties(FOREIGN_KEYS);
-            String token = issuer(foreign, Instant.now()).issueAccessToken(UUID.randomUUID()).token();
+            String token = issuer(foreign, Instant.now()).issueAccessToken(UUID.randomUUID()).accessToken();
 
             assertUnauthenticated(get(PROBE, token), PROBE);
         }
@@ -182,7 +182,7 @@ class SecurityChainIT {
         @DisplayName("GET /api/me → 200 with the userId taken from the token's sub")
         void me() throws Exception {
             UUID userId = UUID.randomUUID();
-            String token = issuer(ourProperties, Instant.now()).issueAccessToken(userId).token();
+            String token = issuer(ourProperties, Instant.now()).issueAccessToken(userId).accessToken();
 
             HttpResponse<String> response = get("/api/me", token);
 
@@ -253,7 +253,7 @@ class SecurityChainIT {
     }
 
     private String validToken() {
-        return issuer(ourProperties, Instant.now()).issueAccessToken(UUID.randomUUID()).token();
+        return issuer(ourProperties, Instant.now()).issueAccessToken(UUID.randomUUID()).accessToken();
     }
 
     private static AccessTokenIssuer issuer(JWKProperties properties, Instant issuedAt) {

@@ -9,6 +9,7 @@ import dev.amishko.aperitivo.identity.security.GoogleIdTokenVerifier;
 import dev.amishko.aperitivo.identity.service.LoginRegistrationService;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -33,12 +34,8 @@ public class AuthenticationController {
         ProviderIdentityProfile providerIdentityProfile = googleIdTokenVerifier.verifyIdentity(googleIdToken.idToken());
         LoginResult loginResult = loginRegistrationService.handleLogin(providerIdentityProfile);
         AperitivoAccessToken accessToken = accessTokenIssuer.issueAccessToken(loginResult.userId());
-        return new ResponseEntity<>(accessToken, createHeaders(), HttpStatus.OK);
-    }
-
-    private HttpHeaders createHeaders() {
-        HttpHeaders headers = new HttpHeaders();
-        headers.add(HttpHeaders.CACHE_CONTROL, "no-cache, no-store");
-        return headers;
+        return  ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(accessToken);
     }
 }

@@ -2,8 +2,7 @@ package dev.amishko.aperitivo.identity.security;
 
 import dev.amishko.aperitivo.identity.config.AperitivoJWKConfig;
 import dev.amishko.aperitivo.identity.config.properties.JWKProperties;
-import dev.amishko.aperitivo.identity.dto.tokens.AccessTokenDto;
-import dev.amishko.aperitivo.identity.security.AccessTokenIssuer;
+import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoAccessToken;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -73,8 +72,8 @@ class AccessTokenIssuerTest {
         UUID userId = UUID.randomUUID();
         Instant issuedAt = now();
 
-        AccessTokenDto dto = issuer(ourProperties, fixedAt(issuedAt)).issueAccessToken(userId);
-        Jwt jwt = decoder.decode(dto.token());
+        AperitivoAccessToken dto = issuer(ourProperties, fixedAt(issuedAt)).issueAccessToken(userId);
+        Jwt jwt = decoder.decode(dto.accessToken());
 
         assertThat(jwt.getSubject()).isEqualTo(userId.toString());
         assertThat(jwt.getClaimAsString("iss")).isEqualTo(ISSUER);
@@ -84,7 +83,10 @@ class AccessTokenIssuerTest {
         assertThat(jwt.getId()).isNotBlank();
         assertThat(jwt.getClaims()).containsOnlyKeys("sub", "iss", "aud", "iat", "exp", "jti");
         assertThat(jwt.getHeaders()).containsEntry("kid", KEY_ID).containsEntry("alg", "RS256");
-        assertThat(dto.expiresAt()).isEqualTo(jwt.getExpiresAt());
+        assertThat(dto.tokenType()).isEqualTo("Bearer");
+        assertThat(dto.expiresIn())
+                .as("expiresIn is seconds until exp (RFC 6749 §5.1, api.md): 15 min = 900")
+                .isEqualTo(TTL_MINUTES * 60L);
     }
 
     @Test
@@ -93,8 +95,8 @@ class AccessTokenIssuerTest {
         AccessTokenIssuer issuer = issuer(ourProperties, fixedAt(now()));
         UUID userId = UUID.randomUUID();
 
-        String first = decoder.decode(issuer.issueAccessToken(userId).token()).getId();
-        String second = decoder.decode(issuer.issueAccessToken(userId).token()).getId();
+        String first = decoder.decode(issuer.issueAccessToken(userId).accessToken()).getId();
+        String second = decoder.decode(issuer.issueAccessToken(userId).accessToken()).getId();
 
         assertThat(first).isNotEqualTo(second);
     }
@@ -106,7 +108,7 @@ class AccessTokenIssuerTest {
         @Test
         void tokenSignedWithForeignKey() {
             String token = issuer(properties(foreignKeys, ISSUER, AUDIENCE), fixedAt(now()))
-                    .issueAccessToken(UUID.randomUUID()).token();
+                    .issueAccessToken(UUID.randomUUID()).accessToken();
 
             assertThatThrownBy(() -> decoder.decode(token))
                     .isInstanceOf(BadJwtException.class)
@@ -116,7 +118,7 @@ class AccessTokenIssuerTest {
         @Test
         void expiredToken() {
             Instant longAgo = now().minus(Duration.ofHours(1));
-            String token = issuer(ourProperties, fixedAt(longAgo)).issueAccessToken(UUID.randomUUID()).token();
+            String token = issuer(ourProperties, fixedAt(longAgo)).issueAccessToken(UUID.randomUUID()).accessToken();
 
             assertThatThrownBy(() -> decoder.decode(token))
                     .isInstanceOf(JwtValidationException.class)
@@ -126,7 +128,7 @@ class AccessTokenIssuerTest {
         @Test
         void foreignAudience() {
             String token = issuer(properties(ourKeys, ISSUER, "aperitivo-admin"), fixedAt(now()))
-                    .issueAccessToken(UUID.randomUUID()).token();
+                    .issueAccessToken(UUID.randomUUID()).accessToken();
 
             assertThatThrownBy(() -> decoder.decode(token))
                     .isInstanceOf(JwtValidationException.class)
@@ -136,7 +138,7 @@ class AccessTokenIssuerTest {
         @Test
         void foreignIssuer() {
             String token = issuer(properties(ourKeys, "https://accounts.google.com", AUDIENCE), fixedAt(now()))
-                    .issueAccessToken(UUID.randomUUID()).token();
+                    .issueAccessToken(UUID.randomUUID()).accessToken();
 
             assertThatThrownBy(() -> decoder.decode(token))
                     .isInstanceOf(JwtValidationException.class)
@@ -145,7 +147,7 @@ class AccessTokenIssuerTest {
 
         @Test
         void tamperedPayload() {
-            String token = issuer(ourProperties, fixedAt(now())).issueAccessToken(UUID.randomUUID()).token();
+            String token = issuer(ourProperties, fixedAt(now())).issueAccessToken(UUID.randomUUID()).accessToken();
             String[] parts = token.split("\\.");
             Base64.Decoder b64Decoder = Base64.getUrlDecoder();
             Base64.Encoder b64Encoder = Base64.getUrlEncoder().withoutPadding();
