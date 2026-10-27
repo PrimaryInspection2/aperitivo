@@ -5,6 +5,7 @@ import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -35,7 +36,7 @@ public class SecurityConfig {
                                  AperitivoJwtTokenConverter jwtTokenConverter) {
         http
                 .authorizeHttpRequests(requests -> requests
-                        .requestMatchers("/api/auth/google").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/google").permitAll()
                         .requestMatchers("/api/**").authenticated()
                         .requestMatchers(PUBLIC_INFRA_PATTERNS).permitAll()
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()

@@ -2,47 +2,49 @@ package dev.amishko.aperitivo.identity.security;
 
 import dev.amishko.aperitivo.identity.dto.IdentityProvider;
 import dev.amishko.aperitivo.identity.dto.ProviderIdentityProfile;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.oauth2.client.oidc.authentication.OidcIdTokenValidator;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtClaimValidator;
-import org.springframework.security.oauth2.jwt.JwtValidationException;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.jwt.*;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Objects;
 
 import static org.apache.commons.lang3.StringUtils.isNotBlank;
 
 @Slf4j
-@RequiredArgsConstructor
 @Component
 public class GoogleIdTokenVerifier {
 
-    private final ClientRegistrationRepository clientRegistrationRepository;
+    private final NimbusJwtDecoder googleJwtDecoder;
+    private final ClientRegistration googleClientRegistration;
+
+    public GoogleIdTokenVerifier(ClientRegistrationRepository clientRegistrationRepository) {
+        this.googleClientRegistration = clientRegistrationRepository.findByRegistrationId("google");
+        this.googleJwtDecoder = NimbusJwtDecoder.withIssuerLocation(googleClientRegistration.getProviderDetails().getIssuerUri()).build();
+    }
 
     public ProviderIdentityProfile verifyIdentity(String idToken) {
-        ClientRegistration google = clientRegistrationRepository.findByRegistrationId("google");
-        NimbusJwtDecoder googleJwtDecoder = NimbusJwtDecoder.withIssuerLocation(google.getProviderDetails().getIssuerUri()).build();
-        googleJwtDecoder.setJwtValidator(new OidcIdTokenValidator(google));
-        googleJwtDecoder.setJwtValidator(new JwtClaimValidator<>("email_verified", claim -> Boolean.TRUE));
+        JwtValidators.createDefaultWithValidators(List.of(
+                new OidcIdTokenValidator(googleClientRegistration),
+                new JwtClaimValidator<>("email_verified", claim -> claim.equals("true"))));
 
-        Jwt jwt = null;
+        Jwt jwt;
         try {
             if (isNotBlank(idToken)) {
                 jwt = googleJwtDecoder.decode(idToken);
             } else {
-                log.error("Google Id token should be provided");
+                log.warn("Google Id token should be provided");
                 throw new BadCredentialsException("Invalid idToken");
             }
-        } catch (JwtValidationException ex) {
-            log.error("Google Id token verification failed", ex);
+        } catch (JwtException ex) {
+            log.warn("Google Id token verification failed", ex);
+            throw new BadCredentialsException("Invalid idToken");
         }
-        log.info("Google Id token verification successful");
+        log.warn("Google Id token verification successful");
         return buildIdentityProfile(jwt);
     }
 
