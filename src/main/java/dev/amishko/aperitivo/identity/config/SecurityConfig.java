@@ -35,6 +35,7 @@ public class SecurityConfig {
                                  AperitivoJwtTokenConverter jwtTokenConverter) {
         http
                 .authorizeHttpRequests(requests -> requests
+                        .requestMatchers("/api/auth/google").permitAll()
                         .requestMatchers("/api/**").authenticated()
                         .requestMatchers(PUBLIC_INFRA_PATTERNS).permitAll()
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()

@@ -24,7 +24,7 @@ import java.time.Instant;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class OAuth2GoogleLoginCallbackService {
+public class LoginRegistrationService {
 
     private final UserRepository userRepository;
     private final UserIdentityRepository userIdentityRepository;

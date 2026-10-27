@@ -39,7 +39,7 @@ class FirstLoginRaceIT extends BaseIT {
     private static final int RACERS = 2;
 
     @Autowired
-    private OAuth2GoogleLoginCallbackService loginService;
+    private LoginRegistrationService loginService;
 
     /**
      * Runs right after every real {@code findByProviderAndProviderUserId} call; no-op outside this test.
