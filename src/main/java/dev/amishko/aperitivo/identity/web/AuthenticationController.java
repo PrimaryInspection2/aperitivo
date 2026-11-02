@@ -4,14 +4,12 @@ import dev.amishko.aperitivo.identity.dto.LoginResult;
 import dev.amishko.aperitivo.identity.dto.ProviderIdentityProfile;
 import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoAccessToken;
 import dev.amishko.aperitivo.identity.dto.tokens.google.GoogleIdToken;
-import dev.amishko.aperitivo.identity.security.AccessTokenIssuer;
+import dev.amishko.aperitivo.identity.security.AperitivoAccessTokenIssuer;
 import dev.amishko.aperitivo.identity.security.GoogleIdTokenVerifier;
 import dev.amishko.aperitivo.identity.service.LoginRegistrationService;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,13 +25,13 @@ public class AuthenticationController {
 
     private final GoogleIdTokenVerifier googleIdTokenVerifier;
     private final LoginRegistrationService loginRegistrationService;
-    private final AccessTokenIssuer accessTokenIssuer;
+    private final AperitivoAccessTokenIssuer aperitivoAccessTokenIssuer;
 
     @PostMapping(value = "/api/auth/google", consumes = APPLICATION_JSON_VALUE)
     public ResponseEntity<@NonNull AperitivoAccessToken> loginWithGoogle(@RequestBody GoogleIdToken googleIdToken) {
         ProviderIdentityProfile providerIdentityProfile = googleIdTokenVerifier.verifyIdentity(googleIdToken.idToken());
         LoginResult loginResult = loginRegistrationService.handleLogin(providerIdentityProfile);
-        AperitivoAccessToken accessToken = accessTokenIssuer.issueAccessToken(loginResult.userId());
+        AperitivoAccessToken accessToken = aperitivoAccessTokenIssuer.issueAccessToken(loginResult.userId());
         return  ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .body(accessToken);

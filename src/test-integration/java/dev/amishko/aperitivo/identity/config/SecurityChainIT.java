@@ -1,7 +1,7 @@
 package dev.amishko.aperitivo.identity.config;
 
 import dev.amishko.aperitivo.identity.config.properties.JWKProperties;
-import dev.amishko.aperitivo.identity.security.AccessTokenIssuer;
+import dev.amishko.aperitivo.identity.security.AperitivoAccessTokenIssuer;
 import dev.amishko.aperitivo.identity.security.AperitivoJwtTokenConverter;
 import dev.amishko.aperitivo.identity.security.exception.ProblemDetailsAccessDeniedHandler;
 import dev.amishko.aperitivo.identity.security.exception.ProblemDetailsAuthenticationEntryPoint;
@@ -256,8 +256,8 @@ class SecurityChainIT {
         return issuer(ourProperties, Instant.now()).issueAccessToken(UUID.randomUUID()).accessToken();
     }
 
-    private static AccessTokenIssuer issuer(JWKProperties properties, Instant issuedAt) {
-        return new AccessTokenIssuer(properties, new AperitivoJWKConfig(properties).aperitivoJwtEncoder(),
+    private static AperitivoAccessTokenIssuer issuer(JWKProperties properties, Instant issuedAt) {
+        return new AperitivoAccessTokenIssuer(properties, new AperitivoJWKConfig(properties).aperitivoJwtEncoder(),
                 Clock.fixed(issuedAt, ZoneOffset.UTC));
     }
 

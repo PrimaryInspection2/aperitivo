@@ -28,7 +28,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class AccessTokenIssuerTest {
+class AperitivoAccessTokenIssuerTest {
 
     private static final String KEY_ID = "test-kid";
     private static final String ISSUER = "https://aperitivo.test";
@@ -51,8 +51,8 @@ class AccessTokenIssuerTest {
                 KEY_ID, issuer, audience, TTL_MINUTES);
     }
 
-    private static AccessTokenIssuer issuer(JWKProperties properties, Clock clock) {
-        return new AccessTokenIssuer(properties, new AperitivoJWKConfig(properties).aperitivoJwtEncoder(), clock);
+    private static AperitivoAccessTokenIssuer issuer(JWKProperties properties, Clock clock) {
+        return new AperitivoAccessTokenIssuer(properties, new AperitivoJWKConfig(properties).aperitivoJwtEncoder(), clock);
     }
 
     private static Clock fixedAt(Instant instant) {
@@ -92,7 +92,7 @@ class AccessTokenIssuerTest {
     @Test
     @DisplayName("each token gets a unique jti")
     void uniqueJti() {
-        AccessTokenIssuer issuer = issuer(ourProperties, fixedAt(now()));
+        AperitivoAccessTokenIssuer issuer = issuer(ourProperties, fixedAt(now()));
         UUID userId = UUID.randomUUID();
 
         String first = decoder.decode(issuer.issueAccessToken(userId).accessToken()).getId();

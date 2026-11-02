@@ -4,7 +4,6 @@ package dev.amishko.aperitivo.identity.security;
 import dev.amishko.aperitivo.identity.config.properties.JWKProperties;
 import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoAccessToken;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.stereotype.Service;
 
@@ -20,7 +19,7 @@ import static org.springframework.security.oauth2.jose.jws.SignatureAlgorithm.RS
 
 @Service
 @RequiredArgsConstructor
-public class AccessTokenIssuer {
+public class AperitivoAccessTokenIssuer {
 
     private final JWKProperties jwkProperties;
     private final JwtEncoder jwtEncoder;
