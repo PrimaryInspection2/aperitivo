@@ -1,10 +1,16 @@
 package dev.amishko.aperitivo.identity.config;
 
 import dev.amishko.aperitivo.identity.config.properties.JWKProperties;
+import dev.amishko.aperitivo.identity.dto.IdentityProvider;
+import dev.amishko.aperitivo.identity.dto.LoginResult;
+import dev.amishko.aperitivo.identity.dto.ProviderIdentityProfile;
 import dev.amishko.aperitivo.identity.security.AperitivoAccessTokenIssuer;
 import dev.amishko.aperitivo.identity.security.AperitivoJwtTokenConverter;
+import dev.amishko.aperitivo.identity.security.GoogleIdTokenVerifier;
 import dev.amishko.aperitivo.identity.security.exception.ProblemDetailsAccessDeniedHandler;
 import dev.amishko.aperitivo.identity.security.exception.ProblemDetailsAuthenticationEntryPoint;
+import dev.amishko.aperitivo.identity.service.LoginRegistrationService;
+import dev.amishko.aperitivo.identity.web.AuthenticationController;
 import dev.amishko.aperitivo.identity.web.OAuth2ConfigurationController;
 import dev.amishko.aperitivo.identity.web.UserProfileController;
 import org.junit.jupiter.api.DisplayName;
@@ -26,9 +32,11 @@ import org.springframework.boot.webmvc.autoconfigure.WebMvcAutoConfiguration;
 import org.springframework.boot.webmvc.autoconfigure.error.ErrorMvcAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.JsonNode;
@@ -51,6 +59,10 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.security.oauth2.jose.jws.SignatureAlgorithm.RS256;
 
 
@@ -80,6 +92,14 @@ class SecurityChainIT {
 
     @Autowired
     private JsonMapper jsonMapper;
+
+    // Google verification and provisioning have their own tests (GoogleIdTokenVerifierTest, FirstLoginRaceIT);
+    // here they are stubbed so the test pins the HTTP contract of POST /api/auth/google.
+    @MockitoBean
+    private GoogleIdTokenVerifier googleIdTokenVerifier;
+
+    @MockitoBean
+    private LoginRegistrationService loginRegistrationService;
 
     private final HttpClient client = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
@@ -158,6 +178,14 @@ class SecurityChainIT {
         }
 
         @Test
+        @DisplayName("Google-shaped ID token as bearer on /api/** → 401 (only OUR tokens are bearer tokens)")
+        void googleIdTokenAsBearer() throws Exception {
+            String googleLike = googleShapedToken();
+
+            assertUnauthenticated(get("/api/me", googleLike), "/api/me");
+        }
+
+        @Test
         @DisplayName("garbage in the Authorization header → 401 Problem Details")
         void malformedToken() throws Exception {
             assertUnauthenticated(get(PROBE, "not-a-jwt"), PROBE);
@@ -204,6 +232,64 @@ class SecurityChainIT {
         }
     }
 
+    @Nested
+    @DisplayName("POST /api/auth/google")
+    class GoogleLogin {
+
+        private static final String BODY = "{\"idToken\":\"google-id-token\"}";
+
+        @Test
+        @DisplayName("valid ID token → 200 {accessToken, tokenType, expiresIn}, no-store; token works on /api/me")
+        void loginIssuesOurAccessToken() throws Exception {
+            UUID userId = UUID.randomUUID();
+            given(googleIdTokenVerifier.verifyIdentity("google-id-token")).willReturn(new ProviderIdentityProfile(
+                    IdentityProvider.GOOGLE, "google-sub-42", "a@example.com", "A", null));
+            given(loginRegistrationService.handleLogin(any())).willReturn(new LoginResult(userId, true));
+
+            HttpResponse<String> response = post("/api/auth/google", "application/json", BODY);
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(response.headers().firstValue("Cache-Control")).hasValue("no-store");
+            JsonNode body = jsonMapper.readTree(response.body());
+            assertThat(body.path("tokenType").asString()).isEqualTo("Bearer");
+            assertThat(body.path("expiresIn").asLong()).isEqualTo(900L);
+            assertThat(body.has("expiresAt")).as("contract is expiresIn (seconds), not a timestamp").isFalse();
+            assertNoSessionCookie(response);
+
+            HttpResponse<String> me = get("/api/me", body.path("accessToken").asString());
+            assertThat(me.statusCode()).isEqualTo(200);
+            assertThat(me.body()).contains(userId.toString());
+        }
+
+        @Test
+        @DisplayName("invalid ID token → 401 Problem Details, nobody is provisioned")
+        void invalidIdToken() throws Exception {
+            given(googleIdTokenVerifier.verifyIdentity(anyString()))
+                    .willThrow(new BadCredentialsException("Invalid idToken"));
+
+            HttpResponse<String> response = post("/api/auth/google", "application/json", BODY);
+
+            assertUnauthenticated(response, "/api/auth/google");
+            verifyNoInteractions(loginRegistrationService);
+        }
+
+        @Test
+        @DisplayName("non-JSON request → 415 (JSON-only is part of the login-CSRF defence)")
+        void nonJson() throws Exception {
+            HttpResponse<String> response = post("/api/auth/google", "application/x-www-form-urlencoded",
+                    "idToken=google-id-token");
+
+            assertThat(response.statusCode()).isEqualTo(415);
+            verifyNoInteractions(googleIdTokenVerifier, loginRegistrationService);
+        }
+
+        @Test
+        @DisplayName("GET is not part of the public surface → not 200")
+        void getIsNotPermitted() throws Exception {
+            assertThat(get("/api/auth/google", null).statusCode()).isIn(401, 405);
+        }
+    }
+
     private void assertUnauthenticated(HttpResponse<String> response, String path) throws Exception {
         assertThat(response.statusCode()).as("status for %s", path).isEqualTo(401);
         assertThat(response.headers().firstValue("WWW-Authenticate"))
@@ -235,6 +321,33 @@ class SecurityChainIT {
             request.header("Authorization", "Bearer " + bearer);
         }
         return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> post(String path, String contentType, String body) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .header("Content-Type", contentType)
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    /**
+     * Claims shaped like a Google ID token, signed by a key that is not ours (even with a colliding kid).
+     */
+    private String googleShapedToken() {
+        Instant now = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer("https://accounts.google.com")
+                .subject("108234567890123456789")
+                .audience(List.of("aperitivo-client.apps.googleusercontent.com"))
+                .issuedAt(now)
+                .expiresAt(now.plus(Duration.ofHours(1)))
+                .claim("email", "a@example.com")
+                .claim("email_verified", true)
+                .build();
+        JwsHeader header = JwsHeader.with(RS256).keyId("test-kid").build();
+        return new AperitivoJWKConfig(properties(FOREIGN_KEYS)).aperitivoJwtEncoder()
+                .encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
     }
 
     private String tokenWithSubject(String subject) {
@@ -297,6 +410,8 @@ class SecurityChainIT {
             AperitivoJwtTokenConverter.class,
             OAuth2ConfigurationController.class,
             UserProfileController.class,
+            AuthenticationController.class,
+            AperitivoAccessTokenIssuer.class,
             ProbeController.class
     })
     static class Cfg {
@@ -304,6 +419,11 @@ class SecurityChainIT {
         @Bean
         JWKProperties jwkProperties() {
             return properties(OUR_KEYS);
+        }
+
+        @Bean
+        Clock clock() {
+            return Clock.systemUTC();
         }
     }
 
