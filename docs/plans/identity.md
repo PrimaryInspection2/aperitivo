@@ -81,11 +81,11 @@
 - [x] Завантаження RSA-ключа (base64 PEM з конфігу або файлу), `kid`; бін `JwtEncoder` (Nimbus).
 - [x] `AccessTokenIssuer`: claims `sub` = `user_id`, `iss`, `aud` = `aperitivo-api`, `iat`, `exp` = 15 хв, `jti`, і нічого більше.
 - [x] `JwtDecoder` для **нашого** токена: підпис, `iss`, `aud`, `exp`.
-- [ ] Конвертер JWT → `CurrentUser(UUID userId)` у published API IAM.
-- [ ] Одна stateless `SecurityFilterChain`, deny by default ([api.md §Security filter chain](../contexts/identity-access/api.md)): без `securityMatcher`, `STATELESS`, CSRF off, CORS off, наш decoder передано явно, `AuthenticationEntryPoint` → `401` Problem Details.
+- [x] Конвертер JWT → `CurrentUser` у published API IAM (`AperitivoJwtTokenConverter`; невалідний `sub` → `InvalidBearerTokenException` → 401).
+- [x] Одна stateless `SecurityFilterChain`, deny by default ([api.md §Security filter chain](../contexts/identity-access/api.md)): без `securityMatcher`, `STATELESS`, CSRF off, CORS off, наш decoder передано явно; `401`/`403` як Problem Details (`ProblemDetailsAuthenticationEntryPoint`, `ProblemDetailsAccessDeniedHandler`).
 - [x] `GET /.well-known/jwks.json`.
-- [ ] `GET /api/me`.
-- [ ] **Тести:** невідомий шлях → відмова; жодна відповідь не ставить `JSESSIONID`; протухлий / чужий токен → `401`.
+- [x] `GET /api/me` — мінімальна версія (`CurrentUser`); повний `UserDto` з `api.md` — коли з'являться sources (крок 6).
+- [x] **Тести:** `SecurityChainIT` — невідомий шлях → 401/403; жодна відповідь не ставить `JSESSIONID`; протухлий / чужий / зламаний токен і невалідний `sub` → `401`.
 
 ## Крок 4 — Логін: `POST /api/auth/google`
 
@@ -149,7 +149,7 @@
 |---|---|
 | 1. Flyway-колізія | ✅ |
 | 2. `user_identities` | ✅ |
-| 3. Наш JWT + chain | 🟡 видача/валідація готові, chain і `CurrentUser` — ні |
+| 3. Наш JWT + chain | ✅ |
 | 4. `POST /api/auth/google` | ⬜️ |
 | 5. Refresh + logout | ⬜️ |
 | 6. Strava connect | ⬜️ |
