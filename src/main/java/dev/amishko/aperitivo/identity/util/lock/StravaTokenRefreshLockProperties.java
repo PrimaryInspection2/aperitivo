@@ -21,20 +21,20 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *       will enter the critical section concurrently.</li>
  * </ul>
  *
- * <p>Bound from {@code aperitivo.identity.token-refresh-lock.*} in
+ * <p>Bound from {@code providers.strava.token-refresh-lock.*} in
  * {@code application.yaml}.
  */
-@ConfigurationProperties(prefix = "aperitivo.identity.token-refresh-lock")
+@ConfigurationProperties(prefix = "providers.strava.token-refresh-lock")
 public record StravaTokenRefreshLockProperties(Duration waitTime, Duration leaseTime) {
 
     public StravaTokenRefreshLockProperties {
         if (waitTime == null || waitTime.isNegative() || waitTime.isZero()) {
             throw new IllegalArgumentException(
-                    "aperitivo.identity.token-refresh-lock.wait-time must be a positive duration");
+                    "providers.strava.token-refresh-lock.wait-time must be a positive duration");
         }
         if (leaseTime == null || leaseTime.isNegative() || leaseTime.isZero()) {
             throw new IllegalArgumentException(
-                    "aperitivo.identity.token-refresh-lock.lease-time must be a positive duration");
+                    "providers.strava.token-refresh-lock.lease-time must be a positive duration");
         }
     }
 }

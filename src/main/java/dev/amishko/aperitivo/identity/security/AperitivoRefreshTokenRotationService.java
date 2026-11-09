@@ -6,18 +6,12 @@ import dev.amishko.aperitivo.identity.repository.RefreshTokenRepository;
 import dev.amishko.aperitivo.identity.repository.entity.RefreshTokenEntity;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.BadCredentialsException;
-import org.springframework.security.crypto.keygen.Base64StringKeyGenerator;
-import org.springframework.security.crypto.keygen.StringKeyGenerator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.Base64;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -27,15 +21,14 @@ import static java.util.Objects.isNull;
 @RequiredArgsConstructor
 public class AperitivoRefreshTokenRotationService {
 
-    private static final StringKeyGenerator REFRESH_TOKEN_GENERATOR = new Base64StringKeyGenerator(Base64.getUrlEncoder().withoutPadding(), 32);
-
+    private final AperitivoRefreshTokenIssuer refreshTokenIssuer;
     private final RefreshTokenRepository refreshTokenRepository;
     private final Clock clock;
-    private final AperitivoRefreshTokenProperties  aperitivoRefreshTokenProperties;
+    private final AperitivoRefreshTokenProperties aperitivoRefreshTokenProperties;
 
     @Transactional
     public AperitivoRefreshTokenResponse rotate(String currentToken) {
-        String currentTokenHash = generateTokenHash(currentToken);
+        String currentTokenHash = refreshTokenIssuer.hashToken(currentToken);
         RefreshTokenEntity refreshToken = refreshTokenRepository.findById(currentTokenHash)
                 .orElseThrow(() -> new RuntimeException("Refresh token not found"));
 
@@ -43,7 +36,7 @@ public class AperitivoRefreshTokenRotationService {
         UUID familyId = refreshToken.getFamilyId();
         Instant now = Instant.now(clock);
 
-        validateExpiredOrRevoked(refreshToken, now, userId, familyId);
+        validateExpiredOrRevoked(refreshToken, now);
 
         int updatedResult = refreshTokenRepository.markTokenAsUsed(currentTokenHash, now);
 
@@ -53,16 +46,7 @@ public class AperitivoRefreshTokenRotationService {
         if (updatedResult == 0 && !isNull(refreshToken.getUsedAt())) {
             return processGraceWindow(currentTokenHash, now, userId, familyId);
         }
-        return issueNewRefreshToken(userId, familyId);
-    }
-
-    @Transactional
-    public RefreshTokenEntity issueNewFamily(UUID userId, String tokenHash) {
-        Instant now = Instant.now(clock);
-        Instant expiresAt = now.plus(aperitivoRefreshTokenProperties.inactiveDaysForInvalidation(), ChronoUnit.DAYS);
-        RefreshTokenEntity refreshTokenEntity = buildRefreshToken(tokenHash, userId, null, now, expiresAt);
-        refreshTokenRepository.save(refreshTokenEntity);
-        return refreshTokenEntity;
+        return issueNext(refreshToken);
     }
 
     private AperitivoRefreshTokenResponse processGraceWindow(String currentTokenHash, Instant now, UUID userId, UUID familyId) {
@@ -70,7 +54,7 @@ public class AperitivoRefreshTokenRotationService {
                 .filter(token -> token.getUsedAt().plusSeconds(aperitivoRefreshTokenProperties.graceWindowSeconds()).isAfter(now))
                 .map(token -> {
                     refreshTokenRepository.markTokenAsUsed(currentTokenHash, now);
-                    return issueNewRefreshToken(userId, familyId);
+                    return issueNext(token);
                 })
                 .orElseGet(() -> {
                     refreshTokenRepository.revokeTokenFamily(userId, familyId, now);
@@ -78,51 +62,11 @@ public class AperitivoRefreshTokenRotationService {
                 });
     }
 
-
-    private RefreshTokenEntity createNextTokenInFamily(UUID userId, UUID familyId, String tokenHash) {
-        Instant now = Instant.now(clock);
-        Instant expiresAt = now.plus(aperitivoRefreshTokenProperties.inactiveDaysForInvalidation(), ChronoUnit.DAYS);
-        RefreshTokenEntity refreshTokenEntity = buildRefreshToken(tokenHash, userId, familyId, now, expiresAt);
-        refreshTokenRepository.save(refreshTokenEntity);
-        return refreshTokenEntity;
+    private AperitivoRefreshTokenResponse issueNext(RefreshTokenEntity current) {
+        return new AperitivoRefreshTokenResponse(refreshTokenIssuer.issueNextInFamily(current), current.getUserId());
     }
 
-    private AperitivoRefreshTokenResponse issueNewRefreshToken(UUID userId, UUID familyId) {
-        String nextRawRefreshToken = generateRawTokenValue();
-        String nextTokenHash = generateTokenHash(nextRawRefreshToken);
-        RefreshTokenEntity nextTokenInFamily = createNextTokenInFamily(userId, familyId, nextTokenHash);
-
-        AperitivoRefreshToken aperitivoRefreshTokenResponse = new AperitivoRefreshToken(nextRawRefreshToken, nextTokenInFamily.getExpiresAt());
-        return new AperitivoRefreshTokenResponse(aperitivoRefreshTokenResponse, userId);
-    }
-
-    private RefreshTokenEntity buildRefreshToken(String tokenHash, UUID userId, UUID familyId, Instant createdAt, Instant expiresAt) {
-        return RefreshTokenEntity.builder()
-                .tokenHash(tokenHash)
-                .userId(userId)
-                .familyId(familyId)
-                .createdAt(createdAt)
-                .expiresAt(expiresAt)
-                .usedAt(null)
-                .revokedAt(null)
-                .build();
-    }
-
-    private String generateRawTokenValue() {
-        return REFRESH_TOKEN_GENERATOR.generateKey();
-    }
-
-    private String generateTokenHash(String rawToken) {
-        byte[] encodedToken;
-        try {
-            encodedToken = MessageDigest.getInstance("SHA-256").digest(rawToken.getBytes(StandardCharsets.UTF_8));
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException(e);
-        }
-        return Base64.getEncoder().withoutPadding().encodeToString(encodedToken);
-    }
-
-    private void validateExpiredOrRevoked(RefreshTokenEntity refreshToken, Instant now, UUID userId, UUID familyId) {
+    private void validateExpiredOrRevoked(RefreshTokenEntity refreshToken, Instant now) {
         if (!Objects.isNull(refreshToken.getRevokedAt())) {
             throw new BadCredentialsException("Token has revoked");
         }

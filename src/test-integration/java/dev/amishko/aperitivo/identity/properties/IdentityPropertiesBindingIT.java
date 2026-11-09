@@ -1,6 +1,7 @@
 package dev.amishko.aperitivo.identity.properties;
 
 import dev.amishko.aperitivo.config.BaseIT;
+import dev.amishko.aperitivo.identity.security.AperitivoRefreshTokenProperties;
 import dev.amishko.aperitivo.identity.config.properties.AuditExecutorProperties;
 import dev.amishko.aperitivo.identity.util.cipher.EncryptionProperties;
 import dev.amishko.aperitivo.identity.util.lock.StravaTokenRefreshLockProperties;
@@ -46,8 +47,11 @@ class IdentityPropertiesBindingIT extends BaseIT {
     @Autowired
     private EncryptionProperties encryptionProperties;
 
+    @Autowired
+    private AperitivoRefreshTokenProperties refreshTokenProperties;
+
     @Nested
-    @DisplayName("aperitivo.identity.token-refresh-lock.*")
+    @DisplayName("providers.strava.token-refresh-lock.*")
     class LockProps {
 
         @Test
@@ -87,6 +91,19 @@ class IdentityPropertiesBindingIT extends BaseIT {
             assertThat(Base64.getDecoder().decode(encryptionProperties.key()))
                     .as("decoded key must be exactly 32 bytes (AES-256)")
                     .hasSize(32);
+        }
+    }
+
+    @Nested
+    @DisplayName("aperitivo.identity.refresh-token.*")
+    class RefreshTokenProps {
+
+        @Test
+        @DisplayName("lifetimes bind from application.yaml (ADR 0013: 14 d idle, 30 d absolute)")
+        void bindsFromDefaults() {
+            assertThat(refreshTokenProperties.inactiveDaysForInvalidation()).isEqualTo(14);
+            assertThat(refreshTokenProperties.absoluteDaysForInvalidation()).isEqualTo(30);
+            assertThat(refreshTokenProperties.graceWindowSeconds()).isBetween(10, 30);
         }
     }
 }

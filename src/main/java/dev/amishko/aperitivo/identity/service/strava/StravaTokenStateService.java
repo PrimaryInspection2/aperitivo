@@ -46,10 +46,10 @@ public class StravaTokenStateService implements TokenStateManager {
     }
 
     @Retryable(retryFor = ObjectOptimisticLockingFailureException.class,
-            maxAttemptsExpression = "${aperitivo.identity.token-refresh.retry.max-attempts}",
+            maxAttemptsExpression = "${providers.strava.token-refresh.retry.max-attempts}",
             backoff = @Backoff(
-                    delayExpression = "${aperitivo.identity.token-refresh.retry.initial-delay-ms}",
-                    multiplierExpression = "${aperitivo.identity.token-refresh.retry.multiplier}"))
+                    delayExpression = "${providers.strava.token-refresh.retry.initial-delay-ms}",
+                    multiplierExpression = "${providers.strava.token-refresh.retry.multiplier}"))
     @Override
     @Transactional
     public TokensDto persistRefreshed(UUID userId, TokensDto refreshedTokens) {

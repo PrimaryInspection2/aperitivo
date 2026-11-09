@@ -20,6 +20,7 @@ public class TestDataCleaner {
     @Transactional
     public void cleanAll() {
         connectedSourceRepository.deleteAllInBatch();
+        jdbc.execute("DELETE FROM identity.refresh_tokens");
         jdbc.execute("DELETE FROM identity.user_identities");
         userRepository.deleteAllInBatch();
         jdbc.execute("TRUNCATE TABLE event_publication");

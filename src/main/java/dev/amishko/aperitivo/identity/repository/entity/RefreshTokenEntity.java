@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
 import org.jspecify.annotations.Nullable;
 import org.springframework.data.domain.Persistable;
 
@@ -35,6 +36,7 @@ public class RefreshTokenEntity implements Persistable<String> {
     private UUID familyId;
 
     @Column(name = "created_at", nullable = false, updatable = false)
+    @CreationTimestamp
     @ToString.Exclude
     private Instant createdAt;
 

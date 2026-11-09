@@ -53,7 +53,7 @@ spring:
             connect-timeout: ${FEIGN_CONNECT_TIMEOUT_MS:3000}
             read-timeout: ${FEIGN_READ_TIMEOUT_MS:10000}
           # Strava OAuth token exchange / refresh.
-          # Timings MUST fit inside aperitivo.identity.token-refresh-lock.lease-time
+          # Timings MUST fit inside providers.strava.token-refresh-lock.lease-time
           # so the Redis lock cannot expire mid-call. Worst case here:
           #   connect (3s) + read (8s) = 11s, versus lease-time 15s → 4s margin.
           strava-oauth:
@@ -127,10 +127,10 @@ aperitivo:
       issuer: aperitivo.app
       audience: aperitivo-api
       ttl: 15
-      refresh-token:
-        inactive-days-for-invalidation: 14
-        absolute-days-for-invalidation: 30
-        grace-window-seconds: 10
+    refresh-token:
+      inactive-days-for-invalidation: 14
+      absolute-days-for-invalidation: 30
+      grace-window-seconds: 10
     login:
       registration-id: ${IAM_LOGIN_REGISTRATION_ID:google}
     encryption:

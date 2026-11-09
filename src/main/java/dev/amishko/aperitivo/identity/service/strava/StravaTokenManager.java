@@ -60,7 +60,7 @@ public class StravaTokenManager implements TokenManager {
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
 
-    @Value("${aperitivo.identity.token-refresh.expiration-buffer}")
+    @Value("${providers.strava.token-refresh.expiration-buffer}")
     private Duration expirationBuffer;
 
     @Override
@@ -83,10 +83,10 @@ public class StravaTokenManager implements TokenManager {
     }
 
     @Retryable(retryFor = ObjectOptimisticLockingFailureException.class,
-            maxAttemptsExpression = "${aperitivo.identity.token-refresh.retry.max-attempts}",
+            maxAttemptsExpression = "${providers.strava.token-refresh.retry.max-attempts}",
             backoff = @Backoff(
-                    delayExpression = "${aperitivo.identity.token-refresh.retry.initial-delay-ms}",
-                    multiplierExpression = "${aperitivo.identity.token-refresh.retry.multiplier}"))
+                    delayExpression = "${providers.strava.token-refresh.retry.initial-delay-ms}",
+                    multiplierExpression = "${providers.strava.token-refresh.retry.multiplier}"))
     @Transactional
     @Override
     public void markRevoked(UUID userId, RevocationReason reason) {
