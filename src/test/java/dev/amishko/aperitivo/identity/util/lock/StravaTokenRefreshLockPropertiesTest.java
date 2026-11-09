@@ -8,12 +8,12 @@ import java.time.Duration;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
-class TokenRefreshLockPropertiesTest {
+class StravaTokenRefreshLockPropertiesTest {
 
     @Test
     @DisplayName("accepts positive wait and lease")
     void acceptsPositiveValues() {
-        assertThatCode(() -> new TokenRefreshLockProperties(Duration.ofSeconds(5), Duration.ofSeconds(15)))
+        assertThatCode(() -> new StravaTokenRefreshLockProperties(Duration.ofSeconds(5), Duration.ofSeconds(15)))
                 .doesNotThrowAnyException();
     }
 
@@ -21,7 +21,7 @@ class TokenRefreshLockPropertiesTest {
     @DisplayName("rejects null wait")
     void rejectsNullWait() {
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> new TokenRefreshLockProperties(null, Duration.ofSeconds(15)))
+                .isThrownBy(() -> new StravaTokenRefreshLockProperties(null, Duration.ofSeconds(15)))
                 .withMessageContaining("wait-time");
     }
 
@@ -29,7 +29,7 @@ class TokenRefreshLockPropertiesTest {
     @DisplayName("rejects zero wait")
     void rejectsZeroWait() {
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> new TokenRefreshLockProperties(Duration.ZERO, Duration.ofSeconds(15)))
+                .isThrownBy(() -> new StravaTokenRefreshLockProperties(Duration.ZERO, Duration.ofSeconds(15)))
                 .withMessageContaining("wait-time");
     }
 
@@ -37,7 +37,7 @@ class TokenRefreshLockPropertiesTest {
     @DisplayName("rejects negative wait")
     void rejectsNegativeWait() {
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> new TokenRefreshLockProperties(Duration.ofSeconds(-1), Duration.ofSeconds(15)))
+                .isThrownBy(() -> new StravaTokenRefreshLockProperties(Duration.ofSeconds(-1), Duration.ofSeconds(15)))
                 .withMessageContaining("wait-time");
     }
 
@@ -45,7 +45,7 @@ class TokenRefreshLockPropertiesTest {
     @DisplayName("rejects null lease")
     void rejectsNullLease() {
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> new TokenRefreshLockProperties(Duration.ofSeconds(5), null))
+                .isThrownBy(() -> new StravaTokenRefreshLockProperties(Duration.ofSeconds(5), null))
                 .withMessageContaining("lease-time");
     }
 
@@ -53,7 +53,7 @@ class TokenRefreshLockPropertiesTest {
     @DisplayName("rejects zero lease")
     void rejectsZeroLease() {
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> new TokenRefreshLockProperties(Duration.ofSeconds(5), Duration.ZERO))
+                .isThrownBy(() -> new StravaTokenRefreshLockProperties(Duration.ofSeconds(5), Duration.ZERO))
                 .withMessageContaining("lease-time");
     }
 
@@ -61,7 +61,7 @@ class TokenRefreshLockPropertiesTest {
     @DisplayName("rejects negative lease")
     void rejectsNegativeLease() {
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> new TokenRefreshLockProperties(Duration.ofSeconds(5), Duration.ofSeconds(-1)))
+                .isThrownBy(() -> new StravaTokenRefreshLockProperties(Duration.ofSeconds(5), Duration.ofSeconds(-1)))
                 .withMessageContaining("lease-time");
     }
 }

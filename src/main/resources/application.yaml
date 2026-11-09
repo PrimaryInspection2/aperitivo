@@ -104,23 +104,10 @@ management:
       export:
         enabled: ${OTLP_LOGS_ENABLED:false}
 
-aperitivo:
-  provider:
-    strava:
-      api:
-        url: https://www.strava.com/api/v3
-  identity:
-    jwt:
-      public-key: ${JWT_PUBLIC_KEY}
-      private-key: ${JWT_PRIVATE_KEY}
-      key-id: ${JWT_KEY_ID}
-      issuer: aperitivo.app
-      audience: aperitivo-api
-      ttl: 15
-    login:
-      registration-id: ${IAM_LOGIN_REGISTRATION_ID:google}
-    encryption:
-      key: ${AES_GCM_SECRET}
+providers:
+  strava:
+    api:
+      url: https://www.strava.com/api/v3
     token-refresh:
       expiration-buffer: ${IAM_TOKEN_EXPIRATION_BUFFER:60s}
       retry:
@@ -130,6 +117,24 @@ aperitivo:
     token-refresh-lock:
       wait-time: ${TOKEN_REFRESH_LOCK_WAIT:5s}
       lease-time: ${TOKEN_REFRESH_LOCK_LEASE:15s}
+
+aperitivo:
+  identity:
+    jwt:
+      public-key: ${JWT_PUBLIC_KEY}
+      private-key: ${JWT_PRIVATE_KEY}
+      key-id: ${JWT_KEY_ID}
+      issuer: aperitivo.app
+      audience: aperitivo-api
+      ttl: 15
+      refresh-token:
+        inactive-days-for-invalidation: 14
+        absolute-days-for-invalidation: 30
+        grace-window-seconds: 10
+    login:
+      registration-id: ${IAM_LOGIN_REGISTRATION_ID:google}
+    encryption:
+      key: ${AES_GCM_SECRET}
     audit-executor:
       core-pool-size: ${IAM_AUDIT_CORE_POOL_SIZE:2}
       max-pool-size: ${IAM_AUDIT_MAX_POOL_SIZE:4}

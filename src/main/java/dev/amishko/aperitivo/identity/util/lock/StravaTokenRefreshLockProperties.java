@@ -25,9 +25,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * {@code application.yaml}.
  */
 @ConfigurationProperties(prefix = "aperitivo.identity.token-refresh-lock")
-public record TokenRefreshLockProperties(Duration waitTime, Duration leaseTime) {
+public record StravaTokenRefreshLockProperties(Duration waitTime, Duration leaseTime) {
 
-    public TokenRefreshLockProperties {
+    public StravaTokenRefreshLockProperties {
         if (waitTime == null || waitTime.isNegative() || waitTime.isZero()) {
             throw new IllegalArgumentException(
                     "aperitivo.identity.token-refresh-lock.wait-time must be a positive duration");

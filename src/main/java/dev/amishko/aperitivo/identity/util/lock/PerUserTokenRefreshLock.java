@@ -21,7 +21,7 @@ public class PerUserTokenRefreshLock {
     private static final String LOCK_KEY_PREFIX = "iam:token-refresh-lock";
 
     private final RedissonClient redisson;
-    private final TokenRefreshLockProperties properties;
+    private final StravaTokenRefreshLockProperties properties;
 
     public <T> T executeWithLock(DataProvider provider, UUID userId, Supplier<T> action) {
         return executeWithLock(provider, userId, properties.waitTime(), properties.leaseTime(), action);

@@ -16,15 +16,12 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshTokenEntity
     //We have unique index to catch this, but it will throw DataIntegrityException and will abort transaction.
     //But I want to gracefully handle that case in initial tx.
     @Modifying
-    @Query("UPDATE RefreshTokenEntity SET usedAt = now() where tokenHash =:tokenHash AND usedAt IS NULL AND revokedAt IS NULL")
-    int markTokenAsUsed(String tokenHash);
+    @Query("UPDATE RefreshTokenEntity SET usedAt =:now where tokenHash =:tokenHash AND usedAt IS NULL AND revokedAt IS NULL")
+    int markTokenAsUsed(String tokenHash, Instant now);
 
     @Modifying
-    @Query("UPDATE RefreshTokenEntity SET revokedAt = now() where userId =:userId AND familyId =:familyId AND revokedAt IS NULL")
-    int revokeTokenFamily(UUID userId, UUID familyId);
-
-    @Query("SELECT MIN(familyCreatedAt) FROM RefreshTokenEntity WHERE userId=:userId AND familyId =:familyId")
-    Instant findOldestTokenInFamily(UUID userId, UUID familyId);
+    @Query("UPDATE RefreshTokenEntity SET revokedAt =:now where userId =:userId AND familyId =:familyId AND revokedAt IS NULL")
+    int revokeTokenFamily(UUID userId, UUID familyId, Instant now);
 
     @Modifying
     @Query("DELETE FROM RefreshTokenEntity WHERE familyCreatedAt <:cutoffDate")

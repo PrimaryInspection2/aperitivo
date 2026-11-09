@@ -3,7 +3,7 @@ package dev.amishko.aperitivo.identity.properties;
 import dev.amishko.aperitivo.config.BaseIT;
 import dev.amishko.aperitivo.identity.config.properties.AuditExecutorProperties;
 import dev.amishko.aperitivo.identity.util.cipher.EncryptionProperties;
-import dev.amishko.aperitivo.identity.util.lock.TokenRefreshLockProperties;
+import dev.amishko.aperitivo.identity.util.lock.StravaTokenRefreshLockProperties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class IdentityPropertiesBindingIT extends BaseIT {
 
     @Autowired
-    private TokenRefreshLockProperties tokenRefreshLockProperties;
+    private StravaTokenRefreshLockProperties stravaTokenRefreshLockProperties;
 
     @Autowired
     private AuditExecutorProperties auditExecutorProperties;
@@ -54,8 +54,8 @@ class IdentityPropertiesBindingIT extends BaseIT {
         @DisplayName("wait-time and lease-time bind from application.yaml defaults")
         void bindsFromDefaults() {
             // Matches application.yaml: wait-time=5s, lease-time=15s.
-            assertThat(tokenRefreshLockProperties.waitTime()).isEqualTo(Duration.ofSeconds(5));
-            assertThat(tokenRefreshLockProperties.leaseTime()).isEqualTo(Duration.ofSeconds(15));
+            assertThat(stravaTokenRefreshLockProperties.waitTime()).isEqualTo(Duration.ofSeconds(5));
+            assertThat(stravaTokenRefreshLockProperties.leaseTime()).isEqualTo(Duration.ofSeconds(15));
         }
     }
 

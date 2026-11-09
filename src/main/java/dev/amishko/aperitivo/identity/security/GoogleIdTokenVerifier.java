@@ -27,7 +27,7 @@ public class GoogleIdTokenVerifier {
         this.googleJwtDecoder = NimbusJwtDecoder.withIssuerLocation(googleClientRegistration.getProviderDetails().getIssuerUri()).build();
         this.googleJwtDecoder.setJwtValidator(JwtValidators.createDefaultWithValidators(List.of(
                 new OidcIdTokenValidator(googleClientRegistration),
-                new JwtClaimValidator<Boolean>("email_verified", Boolean.FALSE::equals))));
+                new JwtClaimValidator<Boolean>("email_verified", Boolean.TRUE::equals))));
     }
 
     public ProviderIdentityProfile verifyIdentity(String idToken) {

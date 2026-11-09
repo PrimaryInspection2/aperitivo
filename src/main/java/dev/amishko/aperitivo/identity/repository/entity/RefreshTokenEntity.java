@@ -24,7 +24,7 @@ import java.util.UUID;
 public class RefreshTokenEntity implements Persistable<String> {
 
     @Id
-    @Column(name = "token_hash", nullable = false, columnDefinition = "bytea")
+    @Column(name = "token_hash", nullable = false)
     @ToString.Exclude
     private String tokenHash;
 

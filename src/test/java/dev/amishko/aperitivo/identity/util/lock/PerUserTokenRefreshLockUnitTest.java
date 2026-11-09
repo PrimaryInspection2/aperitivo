@@ -52,7 +52,7 @@ class PerUserTokenRefreshLockUnitTest {
     private PerUserTokenRefreshLock refreshLock;
 
     private PerUserTokenRefreshLock newLock() {
-        return new PerUserTokenRefreshLock(redisson, new TokenRefreshLockProperties(WAIT, LEASE));
+        return new PerUserTokenRefreshLock(redisson, new StravaTokenRefreshLockProperties(WAIT, LEASE));
     }
 
     // -----------------------------------------------------------------------
