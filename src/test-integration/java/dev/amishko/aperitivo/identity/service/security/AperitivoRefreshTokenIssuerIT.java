@@ -1,4 +1,4 @@
-package dev.amishko.aperitivo.identity.security;
+package dev.amishko.aperitivo.identity.service.security;
 
 import dev.amishko.aperitivo.config.BaseIT;
 import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoRefreshToken;

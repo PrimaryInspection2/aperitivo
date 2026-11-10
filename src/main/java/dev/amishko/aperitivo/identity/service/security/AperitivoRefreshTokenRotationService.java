@@ -24,7 +24,7 @@ public class AperitivoRefreshTokenRotationService {
     private final Clock clock;
     private final AperitivoRefreshTokenProperties aperitivoRefreshTokenProperties;
 
-    @Transactional
+    @Transactional(noRollbackFor = AperitivoRefreshTokenException.class)
     public AperitivoRefreshTokenResponse rotate(String currentToken) {
         Instant now = Instant.now(clock);
         String currentTokenHash = hashToken(currentToken);
