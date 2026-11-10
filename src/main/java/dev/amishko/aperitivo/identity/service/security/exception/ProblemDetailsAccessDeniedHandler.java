@@ -1,4 +1,4 @@
-package dev.amishko.aperitivo.identity.security.exception;
+package dev.amishko.aperitivo.identity.service.security.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;

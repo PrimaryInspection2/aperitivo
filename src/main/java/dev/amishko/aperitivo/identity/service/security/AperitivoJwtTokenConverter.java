@@ -1,4 +1,4 @@
-package dev.amishko.aperitivo.identity.security;
+package dev.amishko.aperitivo.identity.service.security;
 
 import dev.amishko.aperitivo.identity.CurrentUser;
 import org.springframework.core.convert.converter.Converter;

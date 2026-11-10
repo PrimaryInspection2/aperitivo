@@ -6,6 +6,7 @@ import dev.amishko.aperitivo.identity.repository.RefreshTokenRepository;
 import dev.amishko.aperitivo.identity.repository.UserRepository;
 import dev.amishko.aperitivo.identity.repository.entity.RefreshTokenEntity;
 import dev.amishko.aperitivo.identity.repository.entity.UserEntity;
+import dev.amishko.aperitivo.identity.service.security.AperitivoRefreshTokenIssuer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -17,9 +18,12 @@ import java.time.Duration;
 import java.util.Base64;
 import java.util.UUID;
 
+import static dev.amishko.aperitivo.identity.util.cipher.TokenHashUtil.hashToken;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Issuance half of ADR 0013 §2: what is handed to the client vs what is persisted. */
+/**
+ * Issuance half of ADR 0013 §2: what is handed to the client vs what is persisted.
+ */
 class AperitivoRefreshTokenIssuerIT extends BaseIT {
 
     @Autowired
@@ -54,7 +58,7 @@ class AperitivoRefreshTokenIssuerIT extends BaseIT {
         assertThat(refreshTokenRepository.findById(issued.refreshToken()))
                 .as("the raw token is never a key in the table").isEmpty();
 
-        RefreshTokenEntity stored = refreshTokenRepository.findById(issuer.hashToken(issued.refreshToken())).orElseThrow();
+        RefreshTokenEntity stored = refreshTokenRepository.findById(hashToken(issued.refreshToken())).orElseThrow();
         assertThat(stored.getUserId()).isEqualTo(userId);
         assertThat(stored.getFamilyId()).isNotNull();
         assertThat(stored.getUsedAt()).isNull();
@@ -69,7 +73,7 @@ class AperitivoRefreshTokenIssuerIT extends BaseIT {
     @Test
     @DisplayName("hash is deterministic, so a presented token is found by one indexed lookup")
     void hashIsDeterministic() {
-        assertThat(issuer.hashToken("abc")).isEqualTo(issuer.hashToken("abc")).isNotEqualTo(issuer.hashToken("abd"));
+        assertThat(hashToken("abc")).isEqualTo(hashToken("abc")).isNotEqualTo(hashToken("abd"));
     }
 
     @Test
@@ -85,14 +89,14 @@ class AperitivoRefreshTokenIssuerIT extends BaseIT {
     @DisplayName("successor keeps family id and family start, gets a fresh token and idle expiry")
     void successorStaysInFamily() {
         AperitivoRefreshToken first = issuer.issueNewFamily(userId);
-        RefreshTokenEntity current = refreshTokenRepository.findById(issuer.hashToken(first.refreshToken())).orElseThrow();
+        RefreshTokenEntity current = refreshTokenRepository.findById(hashToken(first.refreshToken())).orElseThrow();
         // The successor may only be inserted once its predecessor is no longer active
         // (uq_refresh_tokens_single_token_use_per_family).
         tx.executeWithoutResult(s -> refreshTokenRepository.markTokenAsUsed(current.getTokenHash(), clock.instant()));
 
         AperitivoRefreshToken next = tx.execute(s -> issuer.issueNextInFamily(current));
 
-        RefreshTokenEntity stored = refreshTokenRepository.findById(issuer.hashToken(next.refreshToken())).orElseThrow();
+        RefreshTokenEntity stored = refreshTokenRepository.findById(hashToken(next.refreshToken())).orElseThrow();
         assertThat(next.refreshToken()).isNotEqualTo(first.refreshToken());
         assertThat(stored.getFamilyId()).isEqualTo(current.getFamilyId());
         assertThat(stored.getFamilyCreatedAt()).isEqualTo(current.getFamilyCreatedAt());
@@ -100,7 +104,7 @@ class AperitivoRefreshTokenIssuerIT extends BaseIT {
     }
 
     private UUID familyOf(AperitivoRefreshToken token) {
-        return refreshTokenRepository.findById(issuer.hashToken(token.refreshToken())).orElseThrow().getFamilyId();
+        return refreshTokenRepository.findById(hashToken(token.refreshToken())).orElseThrow().getFamilyId();
     }
 
     private static org.assertj.core.data.TemporalUnitOffset within(Duration d) {

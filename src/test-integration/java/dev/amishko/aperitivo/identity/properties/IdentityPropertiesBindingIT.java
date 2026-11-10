@@ -1,7 +1,7 @@
 package dev.amishko.aperitivo.identity.properties;
 
 import dev.amishko.aperitivo.config.BaseIT;
-import dev.amishko.aperitivo.identity.security.AperitivoRefreshTokenProperties;
+import dev.amishko.aperitivo.identity.service.security.AperitivoRefreshTokenProperties;
 import dev.amishko.aperitivo.identity.config.properties.AuditExecutorProperties;
 import dev.amishko.aperitivo.identity.util.cipher.EncryptionProperties;
 import dev.amishko.aperitivo.identity.util.lock.StravaTokenRefreshLockProperties;

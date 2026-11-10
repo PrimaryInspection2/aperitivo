@@ -1,4 +1,4 @@
-package dev.amishko.aperitivo.identity.security;
+package dev.amishko.aperitivo.identity.service.security;
 
 import dev.amishko.aperitivo.identity.dto.IdentityProvider;
 import dev.amishko.aperitivo.identity.dto.ProviderIdentityProfile;

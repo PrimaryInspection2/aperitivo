@@ -1,4 +1,4 @@
-package dev.amishko.aperitivo.identity.security;
+package dev.amishko.aperitivo.identity.service.security;
 
 import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoRefreshToken;
 import dev.amishko.aperitivo.identity.repository.RefreshTokenRepository;
@@ -9,14 +9,13 @@ import org.springframework.security.crypto.keygen.StringKeyGenerator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.UUID;
+
+import static dev.amishko.aperitivo.identity.util.cipher.TokenHashUtil.hashToken;
 
 
 @Service
@@ -42,20 +41,9 @@ public class AperitivoRefreshTokenIssuer {
     /**
      * Successor of {@code current} in the same family; the family's absolute start is carried over.
      */
-    protected AperitivoRefreshToken issueNextInFamily(RefreshTokenEntity current) {
+    @Transactional
+    public AperitivoRefreshToken issueNextInFamily(RefreshTokenEntity current) {
         return issue(current.getUserId(), current.getFamilyId(), current.getFamilyCreatedAt(), now());
-    }
-
-    /**
-     * Deterministic SHA-256 (base64): the same raw token always maps to the same stored hash.
-     */
-    protected String hashToken(String rawToken) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(rawToken.getBytes(StandardCharsets.UTF_8));
-            return Base64.getEncoder().withoutPadding().encodeToString(digest);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is not available in this JVM", e);
-        }
     }
 
     private AperitivoRefreshToken issue(UUID userId, UUID familyId, Instant familyCreatedAt, Instant now) {
