@@ -21,8 +21,8 @@ public class AperitivoRefreshTokenRotationService {
 
     private final AperitivoRefreshTokenIssuer refreshTokenIssuer;
     private final RefreshTokenRepository refreshTokenRepository;
-    private final Clock clock;
     private final AperitivoRefreshTokenProperties aperitivoRefreshTokenProperties;
+    private final Clock clock;
 
     @Transactional(noRollbackFor = AperitivoRefreshTokenException.class)
     public AperitivoRefreshTokenResponse rotate(String currentToken) {

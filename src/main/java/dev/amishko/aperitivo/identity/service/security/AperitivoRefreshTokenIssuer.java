@@ -16,6 +16,7 @@ import java.util.Base64;
 import java.util.UUID;
 
 import static dev.amishko.aperitivo.identity.util.cipher.TokenHashUtil.hashToken;
+import static org.apache.commons.lang3.compare.ComparableUtils.min;
 
 
 @Service
@@ -26,7 +27,7 @@ public class AperitivoRefreshTokenIssuer {
             new Base64StringKeyGenerator(Base64.getUrlEncoder().withoutPadding(), 32);
 
     private final RefreshTokenRepository refreshTokenRepository;
-    private final AperitivoRefreshTokenProperties properties;
+    private final AperitivoRefreshTokenProperties aperitivoRefreshTokenProperties;
     private final Clock clock;
 
     /**
@@ -48,7 +49,10 @@ public class AperitivoRefreshTokenIssuer {
 
     private AperitivoRefreshToken issue(UUID userId, UUID familyId, Instant familyCreatedAt, Instant now) {
         String rawToken = RAW_TOKEN_GENERATOR.generateKey();
-        Instant expiresAt = now.plus(properties.inactiveDaysForInvalidation(), ChronoUnit.DAYS);
+
+        Instant expirationWithoutRotation = now.plus(aperitivoRefreshTokenProperties.inactiveDaysForInvalidation(), ChronoUnit.DAYS);
+        Instant absoluteExpiration = familyCreatedAt.plus(aperitivoRefreshTokenProperties.absoluteDaysForInvalidation(), ChronoUnit.DAYS);
+        Instant expiresAt = min(expirationWithoutRotation, absoluteExpiration);
 
         refreshTokenRepository.save(RefreshTokenEntity.builder()
                 .tokenHash(hashToken(rawToken))
