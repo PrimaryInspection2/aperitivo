@@ -29,12 +29,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
+import static dev.amishko.aperitivo.identity.web.AuthenticationController.AUTH_API_BASE_PATH;
 import static org.apache.commons.lang3.StringUtils.isBlank;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 
 @Validated
 @RequiredArgsConstructor
-@RestController(AuthenticationController.AUTH_API_BASE_PATH)
+@RestController(value = AUTH_API_BASE_PATH)
 public class AuthenticationController {
 
     final static String REFRESH_TOKEN_COOKIE_NAME = "refresh_token";
