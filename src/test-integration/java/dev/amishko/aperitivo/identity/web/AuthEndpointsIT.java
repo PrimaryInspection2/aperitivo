@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -33,11 +34,18 @@ import static dev.amishko.aperitivo.identity.util.cipher.TokenHashUtil.hashToken
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
+/**
+ * HTTP contracts of {@code POST /api/auth/google}, {@code /api/auth/refresh} and {@code /api/auth/logout}
+ * ({@code api.md} §Login, §Refresh and logout; ADR 0012, ADR 0013). Login → refresh → logout run end to end
+ * against the real database; only Google verification is stubbed ({@code GoogleIdTokenVerifierTest} covers it).
+ * The security chain itself is covered by {@code SecurityChainIT}.
+ */
 @AutoConfigureMockMvc
-class RefreshTokenEndpointsIT extends BaseIT {
+class AuthEndpointsIT extends BaseIT {
 
     private static final String COOKIE = "refresh_token";
     private static final String JSON = "application/json";
@@ -72,8 +80,54 @@ class RefreshTokenEndpointsIT extends BaseIT {
     }
 
     @Nested
-    @DisplayName("POST /api/auth/google sets the refresh cookie")
-    class LoginCookie {
+    @DisplayName("POST /api/auth/google")
+    class GoogleLogin {
+
+        @Test
+        @DisplayName("valid ID token → 200 {accessToken, tokenType, expiresIn}, no-store; access token works on /api/me")
+        void loginIssuesOurAccessToken() throws Exception {
+            MockHttpServletResponse response = login();
+
+            assertThat(response.getHeader("Cache-Control")).isEqualTo("no-store");
+            JsonNode body = jsonMapper.readTree(response.getContentAsString());
+            assertThat(body.path("tokenType").asString()).isEqualTo("Bearer");
+            assertThat(body.path("expiresIn").asLong()).isEqualTo(900L);
+            assertThat(body.has("expiresAt")).as("contract is expiresIn (seconds), not a timestamp").isFalse();
+            assertThat(me(body.path("accessToken").asString())).isNotBlank();
+        }
+
+        @Test
+        @DisplayName("invalid ID token → 401 Problem Details; no user, no refresh token, no cookie")
+        void invalidIdToken() throws Exception {
+            given(googleIdTokenVerifier.verifyIdentity(anyString()))
+                    .willThrow(new BadCredentialsException("Invalid idToken"));
+
+            MockHttpServletResponse response = mvc.perform(post("/api/auth/google")
+                            .contentType(JSON).content("{\"idToken\":\"forged\"}"))
+                    .andReturn().getResponse();
+
+            assertUnauthenticated(response);
+            assertThat(response.getHeaders("Set-Cookie")).noneMatch(c -> c.startsWith(COOKIE + "="));
+            assertThat(count("identity.users")).isZero();
+            assertThat(count("identity.refresh_tokens")).isZero();
+        }
+
+        @Test
+        @DisplayName("non-JSON request → 415, the verifier is never called (JSON-only is part of the login-CSRF defence)")
+        void nonJson() throws Exception {
+            int status = mvc.perform(post("/api/auth/google")
+                            .contentType("application/x-www-form-urlencoded").content("idToken=google-id-token"))
+                    .andReturn().getResponse().getStatus();
+
+            assertThat(status).isEqualTo(415);
+            verifyNoInteractions(googleIdTokenVerifier);
+        }
+
+        @Test
+        @DisplayName("GET is not part of the public surface → not 200")
+        void getIsNotPermitted() throws Exception {
+            assertThat(mvc.perform(get("/api/auth/google")).andReturn().getResponse().getStatus()).isIn(401, 405);
+        }
 
         @Test
         @DisplayName("Set-Cookie refresh_token: HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age = 14 days")
@@ -150,7 +204,7 @@ class RefreshTokenEndpointsIT extends BaseIT {
         @DisplayName("token of a logged-out family → 401")
         void afterLogout() throws Exception {
             String r1 = cookieValue(login());
-            logout(r1);
+            assertThat(logout(r1).getStatus()).isEqualTo(204);
 
             assertUnauthenticated(refresh(r1));
         }
@@ -410,6 +464,10 @@ class RefreshTokenEndpointsIT extends BaseIT {
     private UUID familyOf(String rawToken) {
         return jdbc.queryForObject("SELECT family_id FROM identity.refresh_tokens WHERE token_hash = ?",
                 UUID.class, hashToken(rawToken));
+    }
+
+    private int count(String table) {
+        return jdbc.queryForObject("SELECT count(*) FROM " + table, Integer.class);
     }
 
     private int unrevokedInFamily(UUID familyId) {
