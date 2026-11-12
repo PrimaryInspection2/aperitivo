@@ -1,12 +1,10 @@
 package dev.amishko.aperitivo.identity.service.security;
 
 import dev.amishko.aperitivo.config.BaseIT;
-import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoRefreshTokenResponse;
+import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoRefreshTokenResult;
 import dev.amishko.aperitivo.identity.exception.oauth.AperitivoRefreshTokenException;
 import dev.amishko.aperitivo.identity.repository.UserRepository;
 import dev.amishko.aperitivo.identity.repository.entity.UserEntity;
-import dev.amishko.aperitivo.identity.service.security.AperitivoRefreshTokenIssuer;
-import dev.amishko.aperitivo.identity.service.security.AperitivoRefreshTokenRotationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -65,7 +63,7 @@ class AperitivoRefreshTokenRotationIT extends BaseIT {
         void rotateIssuesSuccessor() {
             String r1 = issuer.issueNewFamily(userId).refreshToken();
 
-            AperitivoRefreshTokenResponse response = rotationService.rotate(r1);
+            AperitivoRefreshTokenResult response = rotationService.rotate(r1);
 
             String r2 = response.token().refreshToken();
             assertThat(response.userId()).isEqualTo(userId);

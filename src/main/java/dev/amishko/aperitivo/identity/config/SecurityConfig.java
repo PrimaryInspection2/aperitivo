@@ -31,12 +31,17 @@ public class SecurityConfig {
             "/actuator/prometheus"
     };
 
+    private static final String[] PUBLIC_AUTH_PATTERNS = {
+            "/api/auth/google",
+            "/api/auth/refresh"
+    };
+
     @Bean
     SecurityFilterChain apiChain(HttpSecurity http, JwtDecoder jwtDecoder, AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler,
                                  AperitivoJwtTokenConverter jwtTokenConverter) {
         http
                 .authorizeHttpRequests(requests -> requests
-                        .requestMatchers(HttpMethod.POST, "/api/auth/google").permitAll()
+                        .requestMatchers(HttpMethod.POST, PUBLIC_AUTH_PATTERNS).permitAll()
                         .requestMatchers("/api/**").authenticated()
                         .requestMatchers(PUBLIC_INFRA_PATTERNS).permitAll()
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()

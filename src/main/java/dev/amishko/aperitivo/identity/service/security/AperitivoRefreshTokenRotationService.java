@@ -1,6 +1,6 @@
 package dev.amishko.aperitivo.identity.service.security;
 
-import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoRefreshTokenResponse;
+import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoRefreshTokenResult;
 import dev.amishko.aperitivo.identity.exception.oauth.AperitivoRefreshTokenException;
 import dev.amishko.aperitivo.identity.repository.RefreshTokenRepository;
 import dev.amishko.aperitivo.identity.repository.entity.RefreshTokenEntity;
@@ -25,7 +25,7 @@ public class AperitivoRefreshTokenRotationService {
     private final Clock clock;
 
     @Transactional(noRollbackFor = AperitivoRefreshTokenException.class)
-    public AperitivoRefreshTokenResponse rotate(String currentToken) {
+    public AperitivoRefreshTokenResult rotate(String currentToken) {
         Instant now = Instant.now(clock);
         String currentTokenHash = hashToken(currentToken);
         RefreshTokenEntity refreshToken = refreshTokenRepository.findByTokenHashForUpdate(currentTokenHash)
@@ -46,8 +46,8 @@ public class AperitivoRefreshTokenRotationService {
         throw new AperitivoRefreshTokenException("Refresh Token reuse detected");
     }
 
-    private AperitivoRefreshTokenResponse issueNext(RefreshTokenEntity current) {
-        return new AperitivoRefreshTokenResponse(refreshTokenIssuer.issueNextInFamily(current), current.getUserId());
+    private AperitivoRefreshTokenResult issueNext(RefreshTokenEntity current) {
+        return new AperitivoRefreshTokenResult(refreshTokenIssuer.issueNextInFamily(current), current.getUserId());
     }
 
     private void validateExpiredOrRevoked(RefreshTokenEntity refreshToken, Instant now) {
