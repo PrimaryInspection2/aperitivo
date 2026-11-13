@@ -4,7 +4,8 @@ import dev.amishko.aperitivo.config.BaseIT;
 import dev.amishko.aperitivo.identity.dto.IdentityProvider;
 import dev.amishko.aperitivo.identity.dto.ProviderIdentityProfile;
 import dev.amishko.aperitivo.identity.repository.RefreshTokenRepository;
-import dev.amishko.aperitivo.identity.service.aperitivo.GoogleIdTokenVerifier;
+import dev.amishko.aperitivo.identity.service.aperitivo.ExpiredRefreshTokenCleanerJob;
+import dev.amishko.aperitivo.identity.service.auth.GoogleIdTokenVerifier;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -17,7 +18,6 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -65,7 +65,7 @@ class AuthEndpointsIT extends BaseIT {
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
-    private TransactionTemplate tx;
+    private ExpiredRefreshTokenCleanerJob  expiredRefreshTokenCleanerJob;
 
     @Autowired
     private Clock clock;
@@ -355,7 +355,7 @@ class AuthEndpointsIT extends BaseIT {
             jdbc.update("UPDATE identity.refresh_tokens SET family_created_at = ? WHERE family_id = ?",
                     Timestamp.from(now.minus(Duration.ofDays(29))), familyOf(live));
 
-            tx.executeWithoutResult(s -> refreshTokenRepository.deleteAllExpiredTokens(now));
+           expiredRefreshTokenCleanerJob.deleteExpiredTokens();
 
             assertThat(refreshTokenRepository.findById(hashToken(expired))).isEmpty();
             assertThat(refreshTokenRepository.findById(hashToken(usedButLive))).isPresent();

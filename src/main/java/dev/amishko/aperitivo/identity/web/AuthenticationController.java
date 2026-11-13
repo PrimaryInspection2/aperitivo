@@ -7,6 +7,9 @@ import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoRefreshToken
 import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoRefreshTokenResult;
 import dev.amishko.aperitivo.identity.dto.tokens.google.GoogleIdToken;
 import dev.amishko.aperitivo.identity.service.aperitivo.*;
+import dev.amishko.aperitivo.identity.service.auth.GoogleIdTokenVerifier;
+import dev.amishko.aperitivo.identity.service.auth.LoginRegistrationService;
+import dev.amishko.aperitivo.identity.service.auth.LogoutService;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;

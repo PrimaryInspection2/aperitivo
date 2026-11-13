@@ -11,7 +11,7 @@ import com.nimbusds.jwt.SignedJWT;
 import com.sun.net.httpserver.HttpServer;
 import dev.amishko.aperitivo.identity.dto.IdentityProvider;
 import dev.amishko.aperitivo.identity.dto.ProviderIdentityProfile;
-import dev.amishko.aperitivo.identity.service.aperitivo.GoogleIdTokenVerifier;
+import dev.amishko.aperitivo.identity.service.auth.GoogleIdTokenVerifier;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
