@@ -36,8 +36,6 @@ import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 @RequestMapping("/api/auth")
 public class AuthenticationController {
 
-
-
     private final GoogleIdTokenVerifier googleIdTokenVerifier;
     private final LoginRegistrationService loginRegistrationService;
     private final LogoutService logoutService;
@@ -91,6 +89,4 @@ public class AuthenticationController {
                 .cacheControl(CacheControl.noStore())
                 .build();
     }
-
-
 }
