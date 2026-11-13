@@ -1,6 +1,7 @@
 package dev.amishko.aperitivo.identity.web.controller;
 
 import dev.amishko.aperitivo.identity.CurrentUser;
+import dev.amishko.aperitivo.identity.dto.tokens.AccessTokenDto;
 import dev.amishko.aperitivo.identity.service.strava.StravaCodeExchangeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -8,6 +9,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @Validated
@@ -19,9 +21,9 @@ public class ConnectedSourceController {
     private final StravaCodeExchangeService codeExchangeService;
 
     @PostMapping("/strava")
-    public ResponseEntity<String> connectStrava(@AuthenticationPrincipal CurrentUser currentUser) {
+    public ResponseEntity<AccessTokenDto> connectStrava(@AuthenticationPrincipal CurrentUser currentUser, @RequestParam String code) {
 
-        codeExchangeService.exchangeToken(currentUser.userUuid(), "123dasd");
-        return ResponseEntity.ok("");
+        AccessTokenDto accessTokenDto = codeExchangeService.exchangeToken(currentUser.userUuid(), code);
+        return ResponseEntity.ok(accessTokenDto);
     }
 }

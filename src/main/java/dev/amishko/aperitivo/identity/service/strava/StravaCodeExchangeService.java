@@ -3,12 +3,14 @@ package dev.amishko.aperitivo.identity.service.strava;
 import dev.amishko.aperitivo.identity.dto.tokens.AccessTokenDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.oauth2.client.OAuth2AuthorizeRequest;
-import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
-import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
+import org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest;
+import org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
-import org.springframework.security.oauth2.core.OAuth2AccessToken;
+import org.springframework.security.oauth2.core.endpoint.OAuth2AccessTokenResponse;
+import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationExchange;
+import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
+import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationResponse;
 import org.springframework.stereotype.Service;
 
 import java.util.UUID;
@@ -19,18 +21,23 @@ import java.util.UUID;
 public class StravaCodeExchangeService {
 
     private final ClientRegistrationRepository clientRegistrationRepository;
-    private final OAuth2AuthorizedClientManager authorizedClientManager;
 
     public AccessTokenDto exchangeToken(UUID userId, String code) {
         ClientRegistration stravaClientRegistration = clientRegistrationRepository.findByRegistrationId("strava");
 
-        OAuth2AuthorizeRequest authorizeRequest = OAuth2AuthorizeRequest.withClientRegistrationId("strava")
-                .attribute("code", code)
-                .principal("code")
-                .build();
-        OAuth2AuthorizedClient authorizedClient = authorizedClientManager.authorize(authorizeRequest);
-        OAuth2AccessToken accessToken = authorizedClient.getAccessToken();
+        RestClientAuthorizationCodeTokenResponseClient tokenExchangeClient =
+                new RestClientAuthorizationCodeTokenResponseClient();
 
-        return new AccessTokenDto(accessToken.getTokenValue(), accessToken.getExpiresAt());
+        OAuth2AuthorizationRequest request = new OAuth2AuthorizationRequest.Builder()
+                .authorizationUri("https://www.strava.com/oauth/authorize")
+                .build();
+        OAuth2AuthorizationResponse response = OAuth2AuthorizationResponse.success("yep").build();
+
+        OAuth2AuthorizationExchange exchange = new OAuth2AuthorizationExchange(request, response);
+        OAuth2AuthorizationCodeGrantRequest oAuth2AuthorizationCodeGrantRequest = new OAuth2AuthorizationCodeGrantRequest(stravaClientRegistration, exchange);
+
+        OAuth2AccessTokenResponse tokenResponse = tokenExchangeClient.getTokenResponse(oAuth2AuthorizationCodeGrantRequest);
+
+        return new AccessTokenDto(tokenResponse.getAccessToken().getTokenValue(), tokenResponse.getAccessToken().getExpiresAt());
     }
 }
