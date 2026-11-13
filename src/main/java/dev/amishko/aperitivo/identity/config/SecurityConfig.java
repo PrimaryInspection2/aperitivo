@@ -33,7 +33,8 @@ public class SecurityConfig {
 
     private static final String[] PUBLIC_AUTH_PATTERNS = {
             "/api/auth/google",
-            "/api/auth/refresh"
+            "/api/auth/refresh",
+            "/api/auth/logout"
     };
 
     @Bean

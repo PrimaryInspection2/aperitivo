@@ -6,11 +6,7 @@ import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoAccessToken;
 import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoRefreshToken;
 import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoRefreshTokenResult;
 import dev.amishko.aperitivo.identity.dto.tokens.google.GoogleIdToken;
-import dev.amishko.aperitivo.identity.service.LoginRegistrationService;
-import dev.amishko.aperitivo.identity.service.security.AperitivoAccessTokenIssuer;
-import dev.amishko.aperitivo.identity.service.security.AperitivoRefreshTokenIssuer;
-import dev.amishko.aperitivo.identity.service.security.AperitivoRefreshTokenRotationService;
-import dev.amishko.aperitivo.identity.service.security.GoogleIdTokenVerifier;
+import dev.amishko.aperitivo.identity.service.security.*;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
@@ -19,10 +15,7 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.validation.annotation.Validated;
-import org.springframework.web.bind.annotation.CookieValue;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -35,7 +28,8 @@ import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 
 @Validated
 @RequiredArgsConstructor
-@RestController(value = AUTH_API_BASE_PATH)
+@RestController
+@RequestMapping(AUTH_API_BASE_PATH)
 public class AuthenticationController {
 
     final static String REFRESH_TOKEN_COOKIE_NAME = "refresh_token";
@@ -43,9 +37,12 @@ public class AuthenticationController {
 
     private final GoogleIdTokenVerifier googleIdTokenVerifier;
     private final LoginRegistrationService loginRegistrationService;
+    private final LogoutService logoutService;
+
     private final AperitivoAccessTokenIssuer aperitivoAccessTokenIssuer;
     private final AperitivoRefreshTokenIssuer aperitivoRefreshTokenIssuer;
     private final AperitivoRefreshTokenRotationService aperitivoRefreshTokenRotationService;
+
     private final Clock clock;
 
     @PostMapping(value = "/google", consumes = APPLICATION_JSON_VALUE)
@@ -55,8 +52,9 @@ public class AuthenticationController {
         AperitivoAccessToken accessToken = aperitivoAccessTokenIssuer.issueAccessToken(loginResult.userId());
         AperitivoRefreshToken aperitivoRefreshToken = aperitivoRefreshTokenIssuer.issueNewFamily(loginResult.userId());
 
+        Duration refreshCookieMaxAge = Duration.between(Instant.now(clock), aperitivoRefreshToken.expiresAt());
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, buildRefreshCookie(aperitivoRefreshToken, Instant.now(clock)).toString())
+                .header(HttpHeaders.SET_COOKIE, buildRefreshCookie(aperitivoRefreshToken.refreshToken(), refreshCookieMaxAge).toString())
                 .cacheControl(CacheControl.noStore())
                 .body(accessToken);
     }
@@ -73,32 +71,31 @@ public class AuthenticationController {
         AperitivoRefreshToken newRefreshToken = refreshTokenResult.token();
         AperitivoAccessToken newAccessToken = aperitivoAccessTokenIssuer.issueAccessToken(userId);
 
+        Duration refreshCookieMaxAge = Duration.between(Instant.now(clock), newRefreshToken.expiresAt());
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, buildRefreshCookie(newRefreshToken, Instant.now(clock)).toString())
+                .header(HttpHeaders.SET_COOKIE, buildRefreshCookie(newRefreshToken.refreshToken(), refreshCookieMaxAge).toString())
                 .cacheControl(CacheControl.noStore())
                 .body(newAccessToken);
     }
 
-    //I think we must be authenticated here to log out, so no permitAll for that endpoint. And why do we consumes APPLICATION_JSON_VALUE?
     @PostMapping(value = "/logout", consumes = APPLICATION_JSON_VALUE)
-    public ResponseEntity<@NonNull String> logout(@CookieValue(value = REFRESH_TOKEN_COOKIE_NAME, required = false) String refreshToken) {
-        if (isBlank(refreshToken)) {
-            throw new BadCredentialsException("Refresh token is required");
-        }
+    public ResponseEntity<@NonNull Void> logout(@CookieValue(value = REFRESH_TOKEN_COOKIE_NAME, required = false) String refreshToken) {
 
-        //call to service to invalidate all user's tokens
-        //set cookie with maxAge = 0, probably just pass Instant.EPOCH into buildRefreshCookie
+        logoutService.logout(refreshToken);
 
-        return ResponseEntity.ok().build();
+        return ResponseEntity.noContent()
+                .header(HttpHeaders.SET_COOKIE, buildRefreshCookie(null, Duration.ZERO).toString())
+                .cacheControl(CacheControl.noStore())
+                .build();
     }
 
-    private static ResponseCookie buildRefreshCookie(AperitivoRefreshToken aperitivoRefreshToken, Instant now) {
-        return ResponseCookie.from(REFRESH_TOKEN_COOKIE_NAME, aperitivoRefreshToken.refreshToken())
+    private static ResponseCookie buildRefreshCookie(String refreshToken, Duration maxAge) {
+        return ResponseCookie.from(REFRESH_TOKEN_COOKIE_NAME, refreshToken)
                 .sameSite("Strict")
                 .httpOnly(true)
                 .path(AUTH_API_BASE_PATH)
                 .secure(true)
-                .maxAge(Duration.between(now, aperitivoRefreshToken.expiresAt()))
+                .maxAge(maxAge)
                 .build();
     }
 }
