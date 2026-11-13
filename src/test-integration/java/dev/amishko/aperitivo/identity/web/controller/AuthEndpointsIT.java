@@ -4,6 +4,8 @@ import dev.amishko.aperitivo.config.BaseIT;
 import dev.amishko.aperitivo.identity.dto.IdentityProvider;
 import dev.amishko.aperitivo.identity.dto.ProviderIdentityProfile;
 import dev.amishko.aperitivo.identity.repository.RefreshTokenRepository;
+import dev.amishko.aperitivo.identity.repository.UserRepository;
+import dev.amishko.aperitivo.identity.repository.entity.UserEntity;
 import dev.amishko.aperitivo.identity.service.aperitivo.ExpiredRefreshTokenCleanerJob;
 import dev.amishko.aperitivo.identity.service.auth.GoogleIdTokenVerifier;
 import jakarta.servlet.http.Cookie;
@@ -63,6 +65,9 @@ class AuthEndpointsIT extends BaseIT {
 
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
+
+    @Autowired
+    private UserRepository userRepository;
 
     @Autowired
     private ExpiredRefreshTokenCleanerJob  expiredRefreshTokenCleanerJob;
@@ -339,6 +344,68 @@ class AuthEndpointsIT extends BaseIT {
     }
 
     @Nested
+    @DisplayName("POST /api/me/sessions/revoke-all (log out everywhere)")
+    class RevokeAll {
+
+        private static final String REVOKE_ALL = "/api/me/sessions/revoke-all";
+
+        @Test
+        @DisplayName("bearer → 204: every family of the user revoked, other users untouched, caller's cookie cleared")
+        void revokesEveryFamilyOfTheUser() throws Exception {
+            MockHttpServletResponse laptopLogin = login();
+            String laptop = cookieValue(laptopLogin);
+            String phone = cookieValue(login());
+            String accessToken = accessToken(laptopLogin);
+            UUID userId = UUID.fromString(me(accessToken));
+            String stranger = issueAnotherFamilyFor(seedOtherUser());
+
+            MockHttpServletResponse response = mvc.perform(post(REVOKE_ALL)
+                            .header("Authorization", "Bearer " + accessToken))
+                    .andReturn().getResponse();
+
+            assertThat(response.getStatus()).isEqualTo(204);
+            assertCookieCleared(response);
+            assertThat(unrevokedOfUser(userId)).isZero();
+            assertUnauthenticated(refresh(laptop));
+            assertUnauthenticated(refresh(phone));
+            assertThat(refresh(stranger).getStatus()).as("another user's session survives").isEqualTo(200);
+        }
+
+        @Test
+        @DisplayName("the access token keeps working until it expires (no denylist, ADR 0013 §5)")
+        void accessTokenOutlivesRevocation() throws Exception {
+            String accessToken = accessToken(login());
+
+            mvc.perform(post(REVOKE_ALL).header("Authorization", "Bearer " + accessToken));
+
+            assertThat(me(accessToken)).isNotBlank();
+        }
+
+        @Test
+        @DisplayName("no bearer → 401 Problem Details, nothing revoked")
+        void requiresBearer() throws Exception {
+            String r1 = cookieValue(login());
+
+            MockHttpServletResponse response = mvc.perform(post(REVOKE_ALL)).andReturn().getResponse();
+
+            assertUnauthenticated(response);
+            assertThat(unrevokedInFamily(familyOf(r1))).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("the refresh cookie alone is not a credential here → 401, nothing revoked")
+        void cookieIsNotACredential() throws Exception {
+            String r1 = cookieValue(login());
+
+            MockHttpServletResponse response = mvc.perform(post(REVOKE_ALL).cookie(new Cookie(COOKIE, r1)))
+                    .andReturn().getResponse();
+
+            assertUnauthenticated(response);
+            assertThat(unrevokedInFamily(familyOf(r1))).isEqualTo(1);
+        }
+    }
+
+    @Nested
     @DisplayName("cleanup of expired rows")
     class Cleanup {
 
@@ -355,7 +422,7 @@ class AuthEndpointsIT extends BaseIT {
             jdbc.update("UPDATE identity.refresh_tokens SET family_created_at = ? WHERE family_id = ?",
                     Timestamp.from(now.minus(Duration.ofDays(29))), familyOf(live));
 
-           expiredRefreshTokenCleanerJob.deleteExpiredTokens();
+            expiredRefreshTokenCleanerJob.deleteExpiredTokens();
 
             assertThat(refreshTokenRepository.findById(hashToken(expired))).isEmpty();
             assertThat(refreshTokenRepository.findById(hashToken(usedButLive))).isPresent();
@@ -464,6 +531,17 @@ class AuthEndpointsIT extends BaseIT {
     private UUID familyOf(String rawToken) {
         return jdbc.queryForObject("SELECT family_id FROM identity.refresh_tokens WHERE token_hash = ?",
                 UUID.class, hashToken(rawToken));
+    }
+
+    private UUID seedOtherUser() {
+        return userRepository.saveAndFlush(UserEntity.builder()
+                .id(UUID.randomUUID()).displayName("stranger").build()).getId();
+    }
+
+    private int unrevokedOfUser(UUID userId) {
+        return jdbc.queryForObject(
+                "SELECT count(*) FROM identity.refresh_tokens WHERE user_id = ? AND revoked_at IS NULL",
+                Integer.class, userId);
     }
 
     private int count(String table) {
