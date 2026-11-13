@@ -1,13 +1,13 @@
 CREATE TABLE identity.refresh_tokens
 (
-    token_hash               TEXT        PRIMARY KEY,
-    user_id                  UUID        NOT NULL,
-    family_id                UUID        NOT NULL,
-    created_at               TIMESTAMPTZ NOT NULL,
-    family_created_at        TIMESTAMPTZ NOT NULL, -- fix edge case when user log in every day, so we cant identify first issued token (for 30 days cleanup) bcs of cleanup job (14 days)
-    expires_at               TIMESTAMPTZ NOT NULL,
-    used_at                  TIMESTAMPTZ,
-    revoked_at               TIMESTAMPTZ,
+    token_hash        TEXT PRIMARY KEY,
+    user_id           UUID        NOT NULL,
+    family_id         UUID        NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL,
+    family_created_at TIMESTAMPTZ NOT NULL, -- fix edge case when user log in every day, so we cant identify first issued token (for 30 days cleanup) bcs of cleanup job (14 days)
+    expires_at        TIMESTAMPTZ NOT NULL,
+    used_at           TIMESTAMPTZ,
+    revoked_at        TIMESTAMPTZ,
 
     CONSTRAINT fk_refresh_token_user
         FOREIGN KEY (user_id) REFERENCES identity.users (id)
@@ -21,7 +21,10 @@ CREATE UNIQUE INDEX uq_refresh_tokens_single_token_use_per_family
 
 -- We will use it for revoke tokens per user per family or for all user's families (logout, reuse active token, etc).
 -- Because we also have index above, but it does not serve all needed rows (bcs condition)
-CREATE  INDEX ix_refresh_tokens_user_id_family_id
+CREATE INDEX ix_refresh_tokens_user_id_family_id
     ON identity.refresh_tokens (user_id, family_id);
+
+CREATE INDEX ix_refresh_tokens_expires_at
+    ON identity.refresh_tokens (expires_at);
 
 

@@ -1,4 +1,4 @@
-package dev.amishko.aperitivo.identity.web;
+package dev.amishko.aperitivo.identity.web.controller;
 
 import dev.amishko.aperitivo.config.BaseIT;
 import dev.amishko.aperitivo.identity.dto.IdentityProvider;

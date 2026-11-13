@@ -1,4 +1,4 @@
-package dev.amishko.aperitivo.identity.web;
+package dev.amishko.aperitivo.identity.web.controller;
 
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.proc.SecurityContext;

@@ -1,4 +1,4 @@
-package dev.amishko.aperitivo.identity.web;
+package dev.amishko.aperitivo.identity.web.controller;
 
 import dev.amishko.aperitivo.identity.dto.LoginResult;
 import dev.amishko.aperitivo.identity.dto.ProviderIdentityProfile;
@@ -25,18 +25,18 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
-import static dev.amishko.aperitivo.identity.web.AuthenticationController.AUTH_API_BASE_PATH;
+import static dev.amishko.aperitivo.identity.web.util.RefreshCookieUtil.REFRESH_TOKEN_COOKIE_NAME;
+import static dev.amishko.aperitivo.identity.web.util.RefreshCookieUtil.buildRefreshCookie;
 import static org.apache.commons.lang3.StringUtils.isBlank;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 
 @Validated
 @RequiredArgsConstructor
 @RestController
-@RequestMapping(AUTH_API_BASE_PATH)
+@RequestMapping("/api/auth")
 public class AuthenticationController {
 
-    final static String REFRESH_TOKEN_COOKIE_NAME = "refresh_token";
-    final static String AUTH_API_BASE_PATH = "/api/auth";
+
 
     private final GoogleIdTokenVerifier googleIdTokenVerifier;
     private final LoginRegistrationService loginRegistrationService;
@@ -92,13 +92,5 @@ public class AuthenticationController {
                 .build();
     }
 
-    private static ResponseCookie buildRefreshCookie(String refreshToken, Duration maxAge) {
-        return ResponseCookie.from(REFRESH_TOKEN_COOKIE_NAME, refreshToken)
-                .sameSite("Strict")
-                .httpOnly(true)
-                .path(AUTH_API_BASE_PATH)
-                .secure(true)
-                .maxAge(maxAge)
-                .build();
-    }
+
 }
