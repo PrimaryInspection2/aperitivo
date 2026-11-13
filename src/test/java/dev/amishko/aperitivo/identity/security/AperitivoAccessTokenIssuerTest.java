@@ -3,7 +3,7 @@ package dev.amishko.aperitivo.identity.security;
 import dev.amishko.aperitivo.identity.config.AperitivoJWKConfig;
 import dev.amishko.aperitivo.identity.config.properties.JWKProperties;
 import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoAccessToken;
-import dev.amishko.aperitivo.identity.service.security.AperitivoAccessTokenIssuer;
+import dev.amishko.aperitivo.identity.service.aperitivo.AperitivoAccessTokenIssuer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;

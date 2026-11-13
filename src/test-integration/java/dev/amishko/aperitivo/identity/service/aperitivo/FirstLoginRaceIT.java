@@ -1,4 +1,4 @@
-package dev.amishko.aperitivo.identity.service;
+package dev.amishko.aperitivo.identity.service.aperitivo;
 
 import dev.amishko.aperitivo.config.BaseIT;
 import dev.amishko.aperitivo.identity.dto.IdentityProvider;
@@ -6,7 +6,6 @@ import dev.amishko.aperitivo.identity.dto.LoginResult;
 import dev.amishko.aperitivo.identity.dto.ProviderIdentityProfile;
 import dev.amishko.aperitivo.identity.events.dto.UserRegisteredEvent;
 import dev.amishko.aperitivo.identity.repository.UserIdentityRepository;
-import dev.amishko.aperitivo.identity.service.security.LoginRegistrationService;
 import org.aopalliance.intercept.MethodInterceptor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

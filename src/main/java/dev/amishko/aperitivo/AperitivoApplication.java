@@ -6,12 +6,14 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.retry.annotation.EnableRetry;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
-@SpringBootApplication
-@ConfigurationPropertiesScan
 @EnableFeignClients(basePackages = "dev.amishko.aperitivo")
 @EnableRetry
 @EnableAsync
+@EnableScheduling
+@SpringBootApplication
+@ConfigurationPropertiesScan
 public class AperitivoApplication {
 
     static void main(String[] args) {

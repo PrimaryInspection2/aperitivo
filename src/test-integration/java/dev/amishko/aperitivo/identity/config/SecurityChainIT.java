@@ -2,7 +2,7 @@ package dev.amishko.aperitivo.identity.config;
 
 import dev.amishko.aperitivo.config.BaseIT;
 import dev.amishko.aperitivo.identity.config.properties.JWKProperties;
-import dev.amishko.aperitivo.identity.service.security.AperitivoAccessTokenIssuer;
+import dev.amishko.aperitivo.identity.service.aperitivo.AperitivoAccessTokenIssuer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;

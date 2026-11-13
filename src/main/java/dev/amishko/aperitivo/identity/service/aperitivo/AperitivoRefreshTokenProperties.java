@@ -1,4 +1,4 @@
-package dev.amishko.aperitivo.identity.service.security;
+package dev.amishko.aperitivo.identity.service.aperitivo;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 

@@ -1,13 +1,13 @@
-package dev.amishko.aperitivo.identity.service.security.exception;
+package dev.amishko.aperitivo.identity.exception.handler;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
-import org.springframework.security.core.AuthenticationException;
-import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
-import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
+import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -16,23 +16,23 @@ import java.net.URI;
 
 @Component
 @RequiredArgsConstructor
-public class ProblemDetailsAuthenticationEntryPoint implements AuthenticationEntryPoint {
+public class ProblemDetailsAccessDeniedHandler implements AccessDeniedHandler {
 
-    private static final String DOMAIN_TYPE = "https://aperitivo.app/errors/unauthenticated";
+    private static final String DOMAIN_TYPE = "https://aperitivo.app/errors/forbidden";
 
     private final JsonMapper jsonMapper;
 
-    private final BearerTokenAuthenticationEntryPoint delegate = new BearerTokenAuthenticationEntryPoint();
+    private final BearerTokenAccessDeniedHandler delegate = new BearerTokenAccessDeniedHandler();
 
     @Override
-    public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException authException) throws IOException {
-        delegate.commence(request, response, authException);
+    public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException accessDeniedException) throws IOException {
+        delegate.handle(request, response, accessDeniedException);
 
         int status = response.getStatus();
         ProblemDetail problemDetail = ProblemDetail.forStatus(status);
         problemDetail.setType(URI.create(DOMAIN_TYPE));
         problemDetail.setInstance(URI.create(request.getRequestURI()));
-        problemDetail.setTitle("Authentication Failed");
+        problemDetail.setTitle("Access Denied");
 
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
 

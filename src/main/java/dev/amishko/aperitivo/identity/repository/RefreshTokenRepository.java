@@ -36,6 +36,6 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshTokenEntity
     int revokeActiveTokenInFamily(UUID userId, UUID familyId, Instant now);
 
     @Modifying
-    @Query("DELETE FROM RefreshTokenEntity WHERE familyCreatedAt <:cutoffDate")
-    int deleteAllExpiredTokens(Instant cutoffDate);
+    @Query("DELETE FROM RefreshTokenEntity WHERE expiresAt <:now")
+    int deleteAllExpiredTokens(Instant now);
 }

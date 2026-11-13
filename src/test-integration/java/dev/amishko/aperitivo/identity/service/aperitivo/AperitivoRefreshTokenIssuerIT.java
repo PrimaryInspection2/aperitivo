@@ -1,4 +1,4 @@
-package dev.amishko.aperitivo.identity.service.security;
+package dev.amishko.aperitivo.identity.service.aperitivo;
 
 import dev.amishko.aperitivo.config.BaseIT;
 import dev.amishko.aperitivo.identity.dto.tokens.aperitivo.AperitivoRefreshToken;
@@ -6,7 +6,6 @@ import dev.amishko.aperitivo.identity.repository.RefreshTokenRepository;
 import dev.amishko.aperitivo.identity.repository.UserRepository;
 import dev.amishko.aperitivo.identity.repository.entity.RefreshTokenEntity;
 import dev.amishko.aperitivo.identity.repository.entity.UserEntity;
-import dev.amishko.aperitivo.identity.service.security.AperitivoRefreshTokenIssuer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

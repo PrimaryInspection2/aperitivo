@@ -4,7 +4,7 @@ import dev.amishko.aperitivo.config.BaseIT;
 import dev.amishko.aperitivo.identity.dto.IdentityProvider;
 import dev.amishko.aperitivo.identity.dto.ProviderIdentityProfile;
 import dev.amishko.aperitivo.identity.repository.RefreshTokenRepository;
-import dev.amishko.aperitivo.identity.service.security.GoogleIdTokenVerifier;
+import dev.amishko.aperitivo.identity.service.aperitivo.GoogleIdTokenVerifier;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;

@@ -1,6 +1,6 @@
 package dev.amishko.aperitivo.identity.config;
 
-import dev.amishko.aperitivo.identity.service.security.AperitivoJwtTokenConverter;
+import dev.amishko.aperitivo.identity.service.aperitivo.AperitivoJwtTokenConverter;
 import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
